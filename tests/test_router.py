@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 
 from app.core.config import TaskRoutingPolicy
 from app.domain.ai_router import ProviderError
+from app.infra.observability import LangfuseTracer
 from app.main import app, provider, settings
 
 
@@ -128,3 +129,75 @@ def test_routing_policy_rejects_invalid_model_ids():
 def test_routing_policy_rejects_duplicate_models():
     with pytest.raises(ValueError):
         TaskRoutingPolicy(models=["openai/model", "openai/model"])
+
+
+def test_langfuse_tracer_sends_metadata_without_payloads():
+    class Span:
+        def __init__(self):
+            self.metadata = None
+            self.ended = False
+
+        def update(self, *, metadata):
+            self.metadata = metadata
+
+        def end(self):
+            self.ended = True
+
+    class Client:
+        def __init__(self):
+            self.span = Span()
+            self.kwargs = None
+            self.flushed = False
+
+        def create_trace_id(self, *, seed):
+            return "trace-id"
+
+        def start_span(self, **kwargs):
+            self.kwargs = kwargs
+            return self.span
+
+        def get_trace_url(self, *, trace_id):
+            return "https://langfuse.example/trace/trace-id"
+
+        def flush(self):
+            self.flushed = True
+
+    client = Client()
+    tracer = LangfuseTracer(client)
+    trace = tracer.start(
+        request_id="req-1",
+        product_id="scholarship_finder",
+        feature_id="extract",
+        task="scholarship_extraction",
+        policy_version="v1",
+    )
+    trace.finish("completed")
+    tracer.flush()
+    assert trace.reference == "https://langfuse.example/trace/trace-id"
+    assert client.kwargs["metadata"] == {
+        "request_id": "req-1",
+        "product_id": "scholarship_finder",
+        "feature_id": "extract",
+        "task": "scholarship_extraction",
+        "model_policy_version": "v1",
+    }
+    assert "source_data" not in client.kwargs
+    assert "output" not in client.kwargs
+    assert client.span.metadata == {"status": "completed"}
+    assert client.span.ended
+    assert client.flushed
+
+
+def test_langfuse_failure_does_not_raise():
+    class BrokenClient:
+        def create_trace_id(self, *, seed):
+            raise RuntimeError("telemetry unavailable")
+
+    trace = LangfuseTracer(BrokenClient()).start(
+        request_id="req-1",
+        product_id="scholarship_finder",
+        feature_id="extract",
+        task="scholarship_extraction",
+        policy_version="v1",
+    )
+    trace.finish("completed")

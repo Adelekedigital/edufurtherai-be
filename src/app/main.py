@@ -11,6 +11,7 @@ from app.api.schemas import ExecuteRequest, ExecuteResponse
 from app.core.config import settings
 from app.domain.ai_router import POLICIES, ProviderError, TerminalStatus, validate_candidate
 from app.infra.database import create_database
+from app.infra.observability import LangfuseTracer
 from app.infra.providers import LiteLLMProvider
 from app.infra.store import MemoryStore, PostgresStore
 
@@ -22,6 +23,7 @@ else:
     engine = None
     store = MemoryStore()
 provider = LiteLLMProvider()
+tracer = LangfuseTracer()
 
 
 def ordered_models(task: str) -> list[str]:
@@ -163,6 +165,13 @@ async def execute(request: Request, body: ExecuteRequest) -> ExecuteResponse | J
             return problem(
                 request, 409, "Conflict", "REQUEST_IN_PROGRESS", "Request is already in progress"
             )
+    trace = tracer.start(
+        request_id=request_id,
+        product_id=body.product_id,
+        feature_id=body.feature_id,
+        task=body.task.value,
+        policy_version=settings.model_policy_version,
+    )
     response: dict[str, Any]
     spent_usd = getattr(store, "spent_usd", 0.0)
     if spent_usd >= settings.daily_budget_usd:
@@ -171,7 +180,7 @@ async def execute(request: Request, body: ExecuteRequest) -> ExecuteResponse | J
             "status": TerminalStatus.BUDGET_EXHAUSTED,
             "output": None,
             "model_policy_version": settings.model_policy_version,
-            "trace_reference": None,
+            "trace_reference": trace.reference,
         }
     else:
         output = None
@@ -199,7 +208,9 @@ async def execute(request: Request, body: ExecuteRequest) -> ExecuteResponse | J
             "status": status,
             "output": output if status == TerminalStatus.COMPLETED else None,
             "model_policy_version": settings.model_policy_version,
-            "trace_reference": None,
+            "trace_reference": trace.reference,
         }
+    trace.finish(str(response["status"]))
+    tracer.flush()
     await store.put(body.product_id, body.idempotency_key, payload, response)
     return ExecuteResponse(**response)
