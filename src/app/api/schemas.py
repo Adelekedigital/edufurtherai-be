@@ -1,7 +1,7 @@
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from app.domain.ai_router import Task, TerminalStatus
 
@@ -11,7 +11,11 @@ class ExecuteRequest(BaseModel):
     product_id: str = Field(min_length=1, max_length=64)
     feature_id: str = Field(min_length=1, max_length=64)
     task: Task
-    taskrelation_id: str = Field(min_length=1, max_length=128)
+    taskrelation_id: str = Field(
+        min_length=1,
+        max_length=128,
+        validation_alias=AliasChoices("correlation_id", "taskrelation_id"),
+    )
     idempotency_key: str = Field(min_length=1, max_length=128)
     source_data: dict[str, Any]
     journey_id: UUID | None = None

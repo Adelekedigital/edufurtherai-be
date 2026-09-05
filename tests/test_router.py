@@ -37,6 +37,20 @@ def test_health_and_contract():
     }
 
 
+def test_correlation_id_is_accepted_as_taskrelation_id_alias():
+    client = TestClient(app)
+    body = request("correlation-alias")
+    body["correlation_id"] = body.pop("taskrelation_id")
+
+    response = client.post(
+        "/api/v1/internal/ai/execute",
+        json=body,
+        headers={"Idempotency-Key": "correlation-alias"},
+    )
+
+    assert response.status_code == 200
+
+
 def test_execute_documents_bearer_authentication_in_openapi():
     schema = TestClient(app).get("/openapi.json").json()
 
