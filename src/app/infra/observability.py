@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Any
 
@@ -15,6 +17,62 @@ class TraceHandle:
         try:
             self.span.update(metadata={"status": status})
             self.span.end()
+        except Exception:
+            return
+
+    def start_generation(self, model: str, attempt: int) -> GenerationHandle:
+        if self.span is None:
+            return GenerationHandle()
+        try:
+            generation = self.span.start_observation(
+                name="model-call",
+                as_type="generation",
+                model=model,
+                metadata={"attempt": attempt},
+            )
+            return GenerationHandle(generation)
+        except Exception:
+            return GenerationHandle()
+
+
+@dataclass
+class GenerationHandle:
+    generation: Any = None
+
+    def finish(
+        self,
+        *,
+        status: str,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
+        estimated_cost_usd: float | None = None,
+        error_category: str | None = None,
+    ) -> None:
+        if self.generation is None:
+            return
+        try:
+            metadata = {"status": status}
+            if error_category:
+                metadata["error_category"] = error_category
+            self.generation.update(
+                metadata=metadata,
+                **(
+                    {
+                        "usage_details": {
+                            "input_tokens": input_tokens,
+                            "output_tokens": output_tokens,
+                        }
+                    }
+                    if input_tokens is not None or output_tokens is not None
+                    else {}
+                ),
+                **(
+                    {"cost_details": {"total": estimated_cost_usd}}
+                    if estimated_cost_usd is not None
+                    else {}
+                ),
+            )
+            self.generation.end()
         except Exception:
             return
 

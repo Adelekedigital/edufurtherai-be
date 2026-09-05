@@ -240,9 +240,10 @@ async def execute(request: Request, body: ExecuteRequest) -> ExecuteResponse | J
     else:
         output = None
         status = TerminalStatus.PROVIDER_UNAVAILABLE
-        for model in ordered_models(body.task.value):
+        for attempt, model in enumerate(ordered_models(body.task.value), start=1):
             if not model:
                 continue
+            generation = trace.start_generation(model, attempt)
             try:
                 result = await provider.complete(
                     task=body.task,
@@ -268,12 +269,24 @@ async def execute(request: Request, body: ExecuteRequest) -> ExecuteResponse | J
                     )
                 else:
                     output = result
+                usage = (
+                    {
+                        "input_tokens": result.input_tokens,
+                        "output_tokens": result.output_tokens,
+                        "estimated_cost_usd": result.estimated_cost_usd,
+                    }
+                    if isinstance(result, CompletionResult)
+                    else {}
+                )
                 if validate_candidate(body.task, output):
                     status = TerminalStatus.COMPLETED
+                    generation.finish(status="completed", **usage)
                     break
                 status = TerminalStatus.REVIEW
+                generation.finish(status="review", **usage)
             except ProviderError as exc:
                 status = TerminalStatus.PROVIDER_UNAVAILABLE
+                generation.finish(status="error", error_category=exc.category)
                 if not exc.retryable:
                     break
         response = {

@@ -139,9 +139,26 @@ def test_langfuse_tracer_sends_metadata_without_payloads():
         def __init__(self):
             self.metadata = None
             self.ended = False
+            self.generation = None
 
         def update(self, *, metadata):
             self.metadata = metadata
+
+        def end(self):
+            self.ended = True
+
+        def start_observation(self, **kwargs):
+            self.generation = Generation(**kwargs)
+            return self.generation
+
+    class Generation:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            self.updated = None
+            self.ended = False
+
+        def update(self, **kwargs):
+            self.updated = kwargs
 
         def end(self):
             self.ended = True
@@ -175,6 +192,13 @@ def test_langfuse_tracer_sends_metadata_without_payloads():
         policy_version="v1",
     )
     trace.finish("completed")
+    generation = trace.start_generation("openai/gpt-4o-mini", 1)
+    generation.finish(
+        status="completed",
+        input_tokens=12,
+        output_tokens=7,
+        estimated_cost_usd=0.004,
+    )
     tracer.flush()
     assert trace.reference == "https://langfuse.example/trace/trace-id"
     assert client.kwargs["metadata"] == {
@@ -188,6 +212,18 @@ def test_langfuse_tracer_sends_metadata_without_payloads():
     assert "output" not in client.kwargs
     assert client.span.metadata == {"status": "completed"}
     assert client.span.ended
+    assert client.span.generation.kwargs == {
+        "name": "model-call",
+        "as_type": "generation",
+        "model": "openai/gpt-4o-mini",
+        "metadata": {"attempt": 1},
+    }
+    assert client.span.generation.updated == {
+        "metadata": {"status": "completed"},
+        "usage_details": {"input_tokens": 12, "output_tokens": 7},
+        "cost_details": {"total": 0.004},
+    }
+    assert client.span.generation.ended
     assert client.flushed
 
 
