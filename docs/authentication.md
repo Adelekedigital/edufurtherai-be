@@ -27,7 +27,9 @@ code, Swagger, or a client application.
 7. Only then does the router call the configured model provider.
 
 The `/health`, `/ready`, `/docs`, and `/openapi.json` endpoints are not protected by the service
-JWT. The AI execute endpoint is protected in production.
+JWT. The AI execute endpoint requires a JWT in every environment by default. For isolated local
+development only, set `ALLOW_UNAUTHENTICATED_DEVELOPMENT=true`; never set this in Railway or any
+shared environment.
 
 ## Required JWT Claims
 
@@ -60,6 +62,7 @@ production configuration registers each product caller explicitly:
 
 ```env
 ENVIRONMENT=production
+ALLOW_UNAUTHENTICATED_DEVELOPMENT=false
 SERVICE_JWT_ALGORITHM=RS256
 SERVICE_CALLERS={"scholarship_finder":{"subject":"scholarship-finder-worker","issuer":"scholarship-finder","audience":"edufurther-ai-router","keys":{"scholarship-finder-2026":"-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"},"scopes":["ai:execute"]}}
 ```

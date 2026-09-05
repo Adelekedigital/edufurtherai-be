@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     environment: str = "development"
+    allow_unauthenticated_development: bool = False
     service_name: str = "edufurther-ai-router"
     service_issuer: str = "edufurther-ai-router"
     service_audience: str = "edufurther-ai-router"

@@ -10,6 +10,11 @@ from app.infra.observability import LangfuseTracer
 from app.main import app, provider, settings, store
 
 
+@pytest.fixture(autouse=True)
+def allow_unauthenticated_development(monkeypatch):
+    monkeypatch.setattr(settings, "allow_unauthenticated_development", True)
+
+
 def request(key="k1"):
     return {
         "product_id": "scholarship_finder",
@@ -58,6 +63,18 @@ def test_execute_documents_bearer_authentication_in_openapi():
     assert schema["paths"]["/api/v1/internal/ai/execute"]["post"]["security"] == [
         {"HTTPBearer": []}
     ]
+
+
+def test_production_requires_authentication(monkeypatch):
+    monkeypatch.setattr(settings, "environment", "production")
+
+    response = TestClient(app).post(
+        "/api/v1/internal/ai/execute",
+        json=request("production-auth-required"),
+        headers={"Idempotency-Key": "production-auth-required"},
+    )
+
+    assert response.status_code == 401
 
 
 def test_unknown_task_denied():

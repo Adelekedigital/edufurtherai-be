@@ -155,10 +155,13 @@ async def execute(
         body.product_id,
         credentials.credentials if credentials else None,
     )
-    if settings.environment != "development" and identity is None:
+    development_bypass = (
+        settings.environment == "development" and settings.allow_unauthenticated_development
+    )
+    if identity is None and not development_bypass:
         return problem(request, 401, "Unauthorized", "UNAUTHORIZED", "Authentication failed")
     if settings.service_jwt_required_scope and (
-        identity is None or settings.service_jwt_required_scope not in identity[1]
+        identity is not None and settings.service_jwt_required_scope not in identity[1]
     ):
         return problem(request, 403, "Forbidden", "INSUFFICIENT_SCOPE", "Required scope is missing")
     policy = POLICIES.get(body.task)
