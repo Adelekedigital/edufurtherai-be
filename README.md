@@ -28,9 +28,18 @@ starting the service; application startup never mutates the database:
 
 ```powershell
 uv run alembic upgrade head
-uv run uvicorn app.main:app --reload
+uv run fastapi dev src/app/main.py
 ```
 
 When `DATABASE_URL` is unset, development tests use the in-process store. That mode is not
 appropriate for multiple workers or production because its idempotency, replay and budget state
 is not shared.
+
+Generate local service JWT keys without OpenSSL:
+
+```powershell
+uv run python scripts/generate_service_keys.py
+```
+
+The generated `.local-secrets/` directory is ignored by Git. Only the public key belongs in the
+Router configuration.
