@@ -11,6 +11,12 @@ publisher, eligibility engine, or general agent runtime.
 JWT and `Idempotency-Key`. Request payloads are limited to 16 KiB of source data. Responses
 contain candidate output only; no `verified` state is ever produced.
 
+## Authentication
+
+The execute endpoint uses short-lived, signed service JWTs. It does not use user sessions or
+password authentication. See [`docs/authentication.md`](docs/authentication.md) for the complete
+caller configuration, token claims, Swagger workflow, and failure responses.
+
 ## Run locally
 
 ```powershell
