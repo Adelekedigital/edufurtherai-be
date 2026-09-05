@@ -15,7 +15,7 @@ contain candidate output only; no `verified` state is ever produced.
 
 ```powershell
 uv sync
-uv run fastapi dev src/app/main.py
+uv run fastapi dev
 ```
 
 Copy `.env.example` to `.env` and provide the approved model(s), provider credentials consumed
@@ -28,7 +28,7 @@ starting the service; application startup never mutates the database:
 
 ```powershell
 uv run alembic upgrade head
-uv run fastapi dev src/app/main.py
+uv run fastapi dev
 ```
 
 When `DATABASE_URL` is unset, development tests use the in-process store. That mode is not
