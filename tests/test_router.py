@@ -2,9 +2,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import TaskRoutingPolicy
-from app.domain.ai_router import ProviderError
+from app.domain.ai_router import CompletionResult, ProviderError
 from app.infra.observability import LangfuseTracer
-from app.main import app, provider, settings
+from app.main import app, provider, settings, store
 
 
 def request(key="k1"):
@@ -201,3 +201,28 @@ def test_langfuse_failure_does_not_raise():
         policy_version="v1",
     )
     trace.finish("completed")
+
+
+def test_provider_usage_is_recorded(monkeypatch):
+    async def complete(*, task, source_data, model, max_tokens):
+        return CompletionResult(
+            output={"candidate": {}, "evidence": []},
+            input_tokens=12,
+            output_tokens=7,
+            estimated_cost_usd=0.004,
+        )
+
+    monkeypatch.setattr(provider, "complete", complete)
+    monkeypatch.setattr(settings, "routing_policy", {})
+    monkeypatch.setattr(settings, "primary_model", "openai/usage-test")
+    monkeypatch.setattr(settings, "fallback_model", "")
+    response = TestClient(app).post(
+        "/api/v1/internal/ai/execute",
+        json=request("usage-recorded"),
+        headers={"Idempotency-Key": "usage-recorded"},
+    )
+    assert response.status_code == 200
+    usage = store.usage[-1]
+    assert usage["input_tokens"] == 12
+    assert usage["output_tokens"] == 7
+    assert usage["estimated_cost_usd"] == 0.004

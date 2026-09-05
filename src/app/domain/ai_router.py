@@ -23,6 +23,14 @@ class Policy:
     allowed_products: frozenset[str]
 
 
+@dataclass(frozen=True)
+class CompletionResult:
+    output: Any
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    estimated_cost_usd: float | None = None
+
+
 POLICIES = {
     Task.SCHOLARSHIP_EXTRACTION: Policy(
         Task.SCHOLARSHIP_EXTRACTION, 1, 2_000, frozenset({"scholarship_finder"})

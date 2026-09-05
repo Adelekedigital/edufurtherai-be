@@ -9,7 +9,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.infra.models import AIIdempotencyKey, AIRequest
+from app.infra.models import AIIdempotencyKey, AIRequest, AIUsage
 
 
 @dataclass
@@ -23,6 +23,7 @@ class MemoryStore:
         self.records: dict[tuple[str, str], IdempotencyRecord] = {}
         self.spent_usd = 0.0
         self.replayed_jtis: set[tuple[str, str]] = set()
+        self.usage: list[dict[str, Any]] = []
 
     @staticmethod
     def digest(payload: dict[str, Any]) -> str:
@@ -43,6 +44,9 @@ class MemoryStore:
             return False
         self.replayed_jtis.add(identity)
         return True
+
+    async def record_usage(self, usage: dict[str, Any]) -> None:
+        self.usage.append(usage)
 
 
 class PostgresStore:
@@ -149,3 +153,8 @@ class PostgresStore:
                     .on_conflict_do_nothing(constraint="uq_service_jti_replay_issuer_jti")
                 )
                 return result.rowcount == 1
+
+    async def record_usage(self, usage: dict[str, Any]) -> None:
+        async with self.sessions() as session:
+            async with session.begin():
+                session.add(AIUsage(**usage))

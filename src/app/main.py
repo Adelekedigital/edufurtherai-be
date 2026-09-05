@@ -9,7 +9,13 @@ from fastapi.responses import JSONResponse
 from app.api.errors import problem
 from app.api.schemas import ExecuteRequest, ExecuteResponse
 from app.core.config import settings
-from app.domain.ai_router import POLICIES, ProviderError, TerminalStatus, validate_candidate
+from app.domain.ai_router import (
+    POLICIES,
+    CompletionResult,
+    ProviderError,
+    TerminalStatus,
+    validate_candidate,
+)
 from app.infra.database import create_database
 from app.infra.observability import LangfuseTracer
 from app.infra.providers import LiteLLMProvider
@@ -189,12 +195,29 @@ async def execute(request: Request, body: ExecuteRequest) -> ExecuteResponse | J
             if not model:
                 continue
             try:
-                output = await provider.complete(
+                result = await provider.complete(
                     task=body.task,
                     source_data=body.source_data,
                     model=model,
                     max_tokens=policy.max_output_tokens,
                 )
+                if isinstance(result, CompletionResult):
+                    output = result.output
+                    await store.record_usage(
+                        {
+                            "request_id": request_id,
+                            "product_id": body.product_id,
+                            "task": body.task.value,
+                            "provider": model.split("/", 1)[0],
+                            "model": model,
+                            "input_tokens": result.input_tokens,
+                            "output_tokens": result.output_tokens,
+                            "estimated_cost_usd": result.estimated_cost_usd or 0,
+                            "attempts": 1,
+                        }
+                    )
+                else:
+                    output = result
                 if validate_candidate(body.task, output):
                     status = TerminalStatus.COMPLETED
                     break

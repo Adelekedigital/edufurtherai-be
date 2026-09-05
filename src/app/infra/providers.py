@@ -1,7 +1,7 @@
 from typing import Any
 
 from app.core.config import settings
-from app.domain.ai_router import ProviderError, Task
+from app.domain.ai_router import CompletionResult, ProviderError, Task
 
 
 class LiteLLMProvider:
@@ -30,7 +30,15 @@ class LiteLLMProvider:
             )
             import json
 
-            return json.loads(result.choices[0].message.content)
+            usage = getattr(result, "usage", None)
+            hidden_params = getattr(result, "_hidden_params", {}) or {}
+            cost = hidden_params.get("response_cost")
+            return CompletionResult(
+                output=json.loads(result.choices[0].message.content),
+                input_tokens=getattr(usage, "prompt_tokens", None),
+                output_tokens=getattr(usage, "completion_tokens", None),
+                estimated_cost_usd=float(cost) if isinstance(cost, (int, float)) else None,
+            )
         except Exception as exc:
             name = type(exc).__name__.lower()
             retryable = any(x in name for x in ("timeout", "ratelimit", "serviceunavailable"))

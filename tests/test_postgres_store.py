@@ -3,10 +3,10 @@ import os
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.infra.models import AIIdempotencyKey, AIRequest, ServiceJTIReplay
+from app.infra.models import AIIdempotencyKey, AIRequest, AIUsage, ServiceJTIReplay
 from app.infra.store import PostgresStore
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -30,6 +30,7 @@ async def _exercise_store() -> None:
 
     async with sessions() as session:
         await session.execute(delete(AIIdempotencyKey))
+        await session.execute(delete(AIUsage))
         await session.execute(delete(AIRequest))
         await session.execute(delete(ServiceJTIReplay))
         await session.commit()
@@ -41,6 +42,22 @@ async def _exercise_store() -> None:
     claimed = await store.get("scholarship_finder", "integration-key")
     assert claimed is not None
     assert claimed.response is None
+    await store.record_usage(
+        {
+            "request_id": request_id,
+            "product_id": "scholarship_finder",
+            "task": "scholarship_extraction",
+            "provider": "openai",
+            "model": "openai/test",
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "estimated_cost_usd": 0.001,
+            "attempts": 1,
+        }
+    )
+    async with sessions() as session:
+        usage = await session.scalar(select(AIUsage).where(AIUsage.request_id == request_id))
+    assert usage is not None and usage.estimated_cost_usd == 0.001
 
     response = {
         "request_id": request_id,
