@@ -1,5 +1,7 @@
+import pytest
 from fastapi.testclient import TestClient
 
+from app.core.config import TaskRoutingPolicy
 from app.domain.ai_router import ProviderError
 from app.main import app, provider, settings
 
@@ -116,3 +118,13 @@ def test_retryable_errors_exhaust_ordered_models(monkeypatch):
     assert response.status_code == 200
     assert response.json()["status"] == "provider_unavailable"
     assert calls == ["one/model", "two/model", "three/model"]
+
+
+def test_routing_policy_rejects_invalid_model_ids():
+    with pytest.raises(ValueError):
+        TaskRoutingPolicy(models=["openai/model", "not-provider-qualified"])
+
+
+def test_routing_policy_rejects_duplicate_models():
+    with pytest.raises(ValueError):
+        TaskRoutingPolicy(models=["openai/model", "openai/model"])

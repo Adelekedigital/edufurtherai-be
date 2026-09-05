@@ -1,5 +1,24 @@
-from pydantic import Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class TaskRoutingPolicy(BaseModel):
+    models: list[str] = Field(min_length=1, max_length=8)
+
+    @field_validator("models")
+    @classmethod
+    def validate_models(cls, models: list[str]) -> list[str]:
+        for model in models:
+            if (
+                not model.strip()
+                or "/" not in model
+                or model.startswith("/")
+                or model.endswith("/")
+            ):
+                raise ValueError("routing models must use a non-empty provider/model ID")
+        if len(set(models)) != len(models):
+            raise ValueError("routing models must not contain duplicates")
+        return models
 
 
 class Settings(BaseSettings):
@@ -15,7 +34,7 @@ class Settings(BaseSettings):
     fallback_model: str = ""
     task_models: dict[str, str] = Field(default_factory=dict)
     provider_keys: dict[str, str] = Field(default_factory=dict)
-    routing_policy: dict[str, dict[str, object]] = Field(default_factory=dict)
+    routing_policy: dict[str, TaskRoutingPolicy] = Field(default_factory=dict)
     model_policy_version: str = "ai-policy-v1"
     daily_budget_usd: float = 25.0
     max_source_bytes: int = 16_384

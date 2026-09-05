@@ -26,7 +26,11 @@ provider = LiteLLMProvider()
 
 def ordered_models(task: str) -> list[str]:
     configured_policy = settings.routing_policy.get(task, {})
-    configured_models = configured_policy.get("models", [])
+    configured_models = (
+        configured_policy.models
+        if hasattr(configured_policy, "models")
+        else configured_policy.get("models", [])
+    )
     if isinstance(configured_models, list) and configured_models:
         candidates = [model for model in configured_models if isinstance(model, str)]
     else:
