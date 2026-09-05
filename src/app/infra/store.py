@@ -1,7 +1,7 @@
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import func, select, text
@@ -24,6 +24,7 @@ class MemoryStore:
         self.spent_usd = 0.0
         self.replayed_jtis: set[tuple[str, str]] = set()
         self.usage: list[dict[str, Any]] = []
+        self.request_times: dict[tuple[str, str], list[datetime]] = {}
 
     @staticmethod
     def digest(payload: dict[str, Any]) -> str:
@@ -56,6 +57,23 @@ class MemoryStore:
             if item.get("product_id") == product and item.get("task") == task
         )
         return spent >= limit
+
+    async def allow_rate_limit(self, product: str, task: str, limit: int) -> bool:
+        if limit <= 0:
+            return True
+        now = datetime.now(UTC)
+        key = (product, task)
+        recent = [
+            timestamp
+            for timestamp in self.request_times.get(key, [])
+            if timestamp > now - timedelta(minutes=1)
+        ]
+        if len(recent) >= limit:
+            self.request_times[key] = recent
+            return False
+        recent.append(now)
+        self.request_times[key] = recent
+        return True
 
 
 class PostgresStore:
@@ -202,3 +220,17 @@ class PostgresStore:
                 )
             )
             return float(spent or 0) >= limit
+
+    async def allow_rate_limit(self, product: str, task: str, limit: int) -> bool:
+        if limit <= 0:
+            return True
+        start = datetime.now(UTC) - timedelta(minutes=1)
+        async with self.sessions() as session:
+            count = await session.scalar(
+                select(func.count(AIRequest.id)).where(
+                    AIRequest.product_id == product,
+                    AIRequest.task == task,
+                    AIRequest.created_at > start,
+                )
+            )
+            return int(count or 0) < limit

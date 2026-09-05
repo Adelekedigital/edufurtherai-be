@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     model_policy_version: str = "ai-policy-v1"
     daily_budget_usd: float = 25.0
     product_task_budgets: dict[str, float] = Field(default_factory=dict)
+    product_task_rate_limits: dict[str, int] = Field(default_factory=dict)
     max_source_bytes: int = 16_384
     langfuse_enabled: bool = False
     langfuse_public_key: str = ""
@@ -47,6 +48,9 @@ class Settings(BaseSettings):
 
     def budget_for(self, product_id: str, task: str) -> float:
         return self.product_task_budgets.get(f"{product_id}:{task}", self.daily_budget_usd)
+
+    def rate_limit_for(self, product_id: str, task: str) -> int:
+        return self.product_task_rate_limits.get(f"{product_id}:{task}", 0)
 
 
 settings = Settings()

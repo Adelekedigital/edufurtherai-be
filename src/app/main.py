@@ -148,6 +148,17 @@ async def execute(request: Request, body: ExecuteRequest) -> ExecuteResponse | J
         return problem(
             request, 409, "Conflict", "REQUEST_IN_PROGRESS", "Request is already in progress"
         )
+    if not await store.allow_rate_limit(
+        body.product_id, body.task.value, settings.rate_limit_for(body.product_id, body.task.value)
+    ):
+        return problem(
+            request,
+            429,
+            "Too Many Requests",
+            "RATE_LIMITED",
+            "Request rate limit exceeded",
+            True,
+        )
     request_id = request.state.request_id
     if isinstance(store, PostgresStore):
         existing = await store.claim(

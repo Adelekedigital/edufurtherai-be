@@ -259,3 +259,37 @@ def test_product_task_budget_blocks_new_request(monkeypatch):
     assert first.json()["status"] == "completed"
     assert second.json()["status"] == "budget_exhausted"
     assert calls == ["openai/budget-test"]
+
+
+def test_product_task_rate_limit_returns_problem(monkeypatch):
+    calls = []
+
+    async def complete(*, task, source_data, model, max_tokens):
+        calls.append(model)
+        return {"candidate": {}, "evidence": []}
+
+    store.request_times.clear()
+    monkeypatch.setattr(provider, "complete", complete)
+    monkeypatch.setattr(settings, "routing_policy", {})
+    monkeypatch.setattr(settings, "primary_model", "openai/rate-test")
+    monkeypatch.setattr(settings, "fallback_model", "")
+    monkeypatch.setattr(
+        settings,
+        "product_task_rate_limits",
+        {"scholarship_finder:scholarship_extraction": 1},
+    )
+    client = TestClient(app)
+    first = client.post(
+        "/api/v1/internal/ai/execute",
+        json=request("rate-first"),
+        headers={"Idempotency-Key": "rate-first"},
+    )
+    second = client.post(
+        "/api/v1/internal/ai/execute",
+        json=request("rate-second"),
+        headers={"Idempotency-Key": "rate-second"},
+    )
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert second.json()["code"] == "RATE_LIMITED"
+    assert calls == ["openai/rate-test"]
