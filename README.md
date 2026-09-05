@@ -18,6 +18,15 @@ uv sync
 uv run fastapi dev
 ```
 
+Railway start command:
+
+```text
+uv run fastapi run main.py --host 0.0.0.0 --port $PORT
+```
+
+The root `main.py` entrypoint adds `src/` to the import path. Do not use
+`uvicorn app.main:app` from the repository root because `app` is stored under `src/`.
+
 Copy `.env.example` to `.env` and provide the approved model(s), provider credentials consumed
 by LiteLLM, and the service public key before making real calls. Provider and Langfuse choices
 remain deployment decisions; this repository does not invent credentials or enable telemetry by
