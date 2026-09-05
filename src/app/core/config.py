@@ -35,10 +35,6 @@ class Settings(BaseSettings):
     environment: str = "development"
     allow_unauthenticated_development: bool = False
     service_name: str = "edufurther-ai-router"
-    service_issuer: str = "edufurther-ai-router"
-    service_audience: str = "edufurther-ai-router"
-    service_jwt_public_key: str = ""
-    service_jwt_keys: dict[str, str] = Field(default_factory=dict)
     service_jwt_algorithm: str = "RS256"
     service_jwt_required_scope: str = ""
     service_callers: dict[str, ServiceCaller] = Field(default_factory=dict)

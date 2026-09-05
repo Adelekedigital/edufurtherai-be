@@ -395,10 +395,6 @@ def test_jwt_key_registry_scope_and_replay(monkeypatch):
         headers={"kid": "rotated"},
     )
     monkeypatch.setattr(settings, "environment", "production")
-    monkeypatch.setattr(settings, "service_jwt_public_key", "")
-    monkeypatch.setattr(
-        settings, "service_jwt_keys", {"rotated": "rotated-secret-with-at-least-32-bytes"}
-    )
     monkeypatch.setattr(settings, "service_jwt_algorithm", "HS256")
     monkeypatch.setattr(settings, "service_jwt_required_scope", "ai:execute")
     monkeypatch.setattr(
