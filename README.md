@@ -43,3 +43,21 @@ uv run python scripts/generate_service_keys.py
 
 The generated `.local-secrets/` directory is ignored by Git. Only the public key belongs in the
 Router configuration.
+
+Create a local caller assertion with the private key:
+
+```powershell
+uv run python scripts/create_service_token.py `
+  --private-key .local-secrets/caller-private.pem `
+  --kid scholarship-finder-2026 `
+  --issuer scholarship-finder `
+  --subject scholarship-finder-worker `
+  --audience edufurther-ai-router
+```
+
+The command prints a short-lived JWT for the `Authorization: Bearer ...` header. The private key
+never belongs in the Router or GitHub Actions migration secrets.
+
+Database migrations are versioned in Git but run explicitly through the manual `Database migration`
+GitHub Actions workflow. Configure `DATABASE_URL` as a secret on the selected GitHub environment;
+the application does not migrate on startup.
