@@ -4,7 +4,7 @@ import jwt
 import pytest
 from fastapi.testclient import TestClient
 
-from app.core.config import TaskRoutingPolicy
+from app.core.config import ServiceCaller, TaskRoutingPolicy
 from app.domain.ai_router import CompletionResult, ProviderError
 from app.infra.observability import LangfuseTracer
 from app.main import app, provider, settings, store
@@ -305,7 +305,7 @@ def test_jwt_key_registry_scope_and_replay(monkeypatch):
     now = datetime.now(UTC)
     token = jwt.encode(
         {
-            "iss": "edufurther-ai-router",
+            "iss": "scholarship-finder",
             "sub": "scholarship-finder-worker",
             "aud": "edufurther-ai-router",
             "iat": now,
@@ -325,6 +325,19 @@ def test_jwt_key_registry_scope_and_replay(monkeypatch):
     )
     monkeypatch.setattr(settings, "service_jwt_algorithm", "HS256")
     monkeypatch.setattr(settings, "service_jwt_required_scope", "ai:execute")
+    monkeypatch.setattr(
+        settings,
+        "service_callers",
+        {
+            "scholarship_finder": ServiceCaller(
+                subject="scholarship-finder-worker",
+                issuer="scholarship-finder",
+                audience="edufurther-ai-router",
+                keys={"rotated": "rotated-secret-with-at-least-32-bytes"},
+                scopes={"ai:execute"},
+            )
+        },
+    )
     monkeypatch.setattr(settings, "routing_policy", {})
     monkeypatch.setattr(settings, "primary_model", "openai/auth-test")
     monkeypatch.setattr(settings, "fallback_model", "")

@@ -21,6 +21,14 @@ class TaskRoutingPolicy(BaseModel):
         return models
 
 
+class ServiceCaller(BaseModel):
+    subject: str = Field(min_length=1, max_length=128)
+    issuer: str = Field(min_length=1, max_length=256)
+    audience: str = Field(min_length=1, max_length=256)
+    keys: dict[str, str] = Field(default_factory=dict)
+    scopes: set[str] = Field(default_factory=set)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -32,6 +40,7 @@ class Settings(BaseSettings):
     service_jwt_keys: dict[str, str] = Field(default_factory=dict)
     service_jwt_algorithm: str = "RS256"
     service_jwt_required_scope: str = ""
+    service_callers: dict[str, ServiceCaller] = Field(default_factory=dict)
     primary_model: str = ""
     fallback_model: str = ""
     task_models: dict[str, str] = Field(default_factory=dict)

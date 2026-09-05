@@ -61,8 +61,13 @@ async def request_context(request: Request, call_next: Any) -> JSONResponse:
     return response
 
 
-async def authenticate(request: Request) -> tuple[str, set[str]] | None:
-    if not settings.service_jwt_public_key and not settings.service_jwt_keys:
+async def authenticate(request: Request, product_id: str) -> tuple[str, set[str]] | None:
+    caller = settings.service_callers.get(product_id)
+    if settings.service_callers and caller is None:
+        return None
+    if caller is not None and not caller.keys and not settings.service_jwt_keys:
+        return None
+    if caller is None and not settings.service_jwt_public_key and not settings.service_jwt_keys:
         return None
     authorization = request.headers.get("Authorization", "")
     if not authorization.startswith("Bearer "):
@@ -71,21 +76,39 @@ async def authenticate(request: Request) -> tuple[str, set[str]] | None:
     try:
         header = jwt.get_unverified_header(token)
         kid = str(header.get("kid", ""))
-        key = (
-            settings.service_jwt_keys.get(kid)
-            if settings.service_jwt_keys
-            else settings.service_jwt_public_key
+        key_registry = (
+            caller.keys if caller is not None and caller.keys else settings.service_jwt_keys
         )
-        if not key or (settings.service_jwt_keys and not kid):
+        key = key_registry.get(kid) if key_registry else settings.service_jwt_public_key
+        if not key or (key_registry and not kid):
             return None
         claims = jwt.decode(
             token,
             key,
             algorithms=[settings.service_jwt_algorithm],
-            issuer=settings.service_issuer,
-            audience=settings.service_audience,
-            options={"require": ["iss", "sub", "aud", "iat", "nbf", "exp", "jti"]},
+            options={
+                "require": ["iss", "sub", "aud", "iat", "nbf", "exp", "jti"],
+                "verify_aud": False,
+            },
         )
+        if caller is not None:
+            audiences = claims["aud"] if isinstance(claims["aud"], list) else [claims["aud"]]
+            if (
+                str(claims["sub"]) != caller.subject
+                or str(claims["iss"]) != caller.issuer
+                or caller.audience not in {str(value) for value in audiences}
+            ):
+                return None
+            scopes = set(str(claims.get("scope", "")).split())
+            if caller.scopes and not caller.scopes.issubset(scopes):
+                return None
+        else:
+            audiences = claims["aud"] if isinstance(claims["aud"], list) else [claims["aud"]]
+            if str(claims["iss"]) != settings.service_issuer or settings.service_audience not in {
+                str(value) for value in audiences
+            }:
+                return None
+            scopes = set(str(claims.get("scope", "")).split())
         if not await store.claim_jti(
             str(claims["iss"]), str(claims["jti"]), datetime.fromtimestamp(claims["exp"], UTC)
         ):
@@ -119,7 +142,7 @@ async def ready(request: Request) -> dict[str, str] | JSONResponse:
 
 @app.post("/api/v1/internal/ai/execute", response_model=ExecuteResponse)
 async def execute(request: Request, body: ExecuteRequest) -> ExecuteResponse | JSONResponse:
-    identity = await authenticate(request)
+    identity = await authenticate(request, body.product_id)
     if settings.environment != "development" and identity is None:
         return problem(request, 401, "Unauthorized", "UNAUTHORIZED", "Authentication failed")
     if settings.service_jwt_required_scope and (
