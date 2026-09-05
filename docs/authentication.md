@@ -4,6 +4,12 @@ The router authenticates callers with short-lived RSA-signed JWTs. This is servi
 authentication: a registered product worker creates a JWT, sends it with the request, and the
 router validates it before running an AI task.
 
+This repository documents the authentication protocol; it does not issue credentials. Publishing
+the protocol and token format is not a secret. A token can only be minted by a caller that possesses
+the caller's private signing key. Keep that private key in the caller application's secret manager
+or deployment secret store. Never put it in this repository, Railway Router variables, browser
+code, Swagger, or a client application.
+
 ## Request Flow
 
 1. The caller creates a new JWT with a unique `jti` and a lifetime of at most five minutes.
@@ -69,6 +75,12 @@ SERVICE_AUDIENCE=edufurther-ai-router
 Never put a caller private key in Railway or in this repository. The private key stays with the
 caller that creates tokens. The router stores only public keys.
 
+Each application gets its own key pair and caller registration. For example, `scholarship_finder`
+uses its own private key and `kid`; a future `career_matcher` application would use a different
+private key, `kid`, issuer, subject, and caller entry. The router does not need an authentication
+endpoint because it is a verifier, not a credential issuer. Token issuance happens inside the
+calling application's trusted backend or an organization-managed token issuer.
+
 ## Create A Token Locally
 
 Generate local service keys if needed:
@@ -91,6 +103,19 @@ uv run python scripts/create_service_token.py `
 
 The command prints a JWT. Each execution creates a new `jti`; do not reuse the same token for a
 second request.
+
+The `scope` argument must be a space-separated string. If the router is configured with
+`SERVICE_JWT_REQUIRED_SCOPE=ai:execute`, the token must contain:
+
+```json
+{
+  "scope": "ai:execute"
+}
+```
+
+The registered caller's `scopes` list must also include `ai:execute`. A missing or differently named
+scope, such as `execute` or `['ai:execute']`, results in `403 INSUFFICIENT_SCOPE` after the JWT
+itself has been accepted. Use `--scope ai:execute` with the provided token utility.
 
 ## Swagger
 
@@ -118,6 +143,10 @@ The `Idempotency-Key` header must also match the request body's `idempotency_key
 
 Authentication failures intentionally return the same generic message and do not reveal whether a
 key, claim, caller, or token ID was invalid.
+
+`403 INSUFFICIENT_SCOPE` is the exception to that generic authentication response: it means the
+JWT was valid enough to identify the caller, but the required scope was not present. Check both the
+token's `scope` claim and `SERVICE_JWT_REQUIRED_SCOPE`/the registered caller's `scopes` setting.
 
 ## Key Rotation
 
