@@ -37,6 +37,15 @@ def test_health_and_contract():
     }
 
 
+def test_execute_documents_bearer_authentication_in_openapi():
+    schema = TestClient(app).get("/openapi.json").json()
+
+    assert schema["components"]["securitySchemes"]["HTTPBearer"]["scheme"] == "bearer"
+    assert schema["paths"]["/api/v1/internal/ai/execute"]["post"]["security"] == [
+        {"HTTPBearer": []}
+    ]
+
+
 def test_unknown_task_denied():
     client = TestClient(app)
     body = request("k2") | {"task": "arbitrary_prompt"}

@@ -1,10 +1,11 @@
 from datetime import UTC, datetime
-from typing import Any
+from typing import Annotated, Any
 from uuid import uuid4
 
 import jwt
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.api.errors import problem
 from app.api.schemas import ExecuteRequest, ExecuteResponse
@@ -22,6 +23,7 @@ from app.infra.providers import LiteLLMProvider
 from app.infra.store import MemoryStore, PostgresStore
 
 app = FastAPI(title="Edufurther AI Router", version="0.1.0")
+bearer_scheme = HTTPBearer(auto_error=False)
 if settings.database_url:
     engine, sessions = create_database(settings.database_url)
     store = PostgresStore(sessions)
@@ -61,7 +63,9 @@ async def request_context(request: Request, call_next: Any) -> JSONResponse:
     return response
 
 
-async def authenticate(request: Request, product_id: str) -> tuple[str, set[str]] | None:
+async def authenticate(
+    request: Request, product_id: str, token: str | None = None
+) -> tuple[str, set[str]] | None:
     caller = settings.service_callers.get(product_id)
     if settings.service_callers and caller is None:
         return None
@@ -69,7 +73,7 @@ async def authenticate(request: Request, product_id: str) -> tuple[str, set[str]
         return None
     if caller is None and not settings.service_jwt_public_key and not settings.service_jwt_keys:
         return None
-    authorization = request.headers.get("Authorization", "")
+    authorization = f"Bearer {token}" if token else request.headers.get("Authorization", "")
     if not authorization.startswith("Bearer "):
         return None
     token = authorization.removeprefix("Bearer ")
@@ -141,8 +145,16 @@ async def ready(request: Request) -> dict[str, str] | JSONResponse:
 
 
 @app.post("/api/v1/internal/ai/execute", response_model=ExecuteResponse)
-async def execute(request: Request, body: ExecuteRequest) -> ExecuteResponse | JSONResponse:
-    identity = await authenticate(request, body.product_id)
+async def execute(
+    request: Request,
+    body: ExecuteRequest,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)] = None,
+) -> ExecuteResponse | JSONResponse:
+    identity = await authenticate(
+        request,
+        body.product_id,
+        credentials.credentials if credentials else None,
+    )
     if settings.environment != "development" and identity is None:
         return problem(request, 401, "Unauthorized", "UNAUTHORIZED", "Authentication failed")
     if settings.service_jwt_required_scope and (
