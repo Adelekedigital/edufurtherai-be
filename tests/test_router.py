@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app.domain.ai_router import ProviderError
+from app.main import app, provider, settings
 
 
 def request(key="k1"):
@@ -45,3 +46,73 @@ def test_idempotency_mismatch():
         "/api/v1/internal/ai/execute", json=request("k3"), headers={"Idempotency-Key": "other"}
     )
     assert response.status_code == 400
+
+
+def test_retryable_provider_error_uses_all_ordered_models(monkeypatch):
+    calls = []
+
+    async def complete(*, task, source_data, model, max_tokens):
+        calls.append(model)
+        if model == "openai/primary":
+            raise ProviderError("provider_transient", retryable=True)
+        return {"candidate": {}, "evidence": []}
+
+    monkeypatch.setattr(provider, "complete", complete)
+    monkeypatch.setattr(
+        settings,
+        "routing_policy",
+        {"scholarship_extraction": {"models": ["openai/primary", "anthropic/secondary"]}},
+    )
+    response = TestClient(app).post(
+        "/api/v1/internal/ai/execute",
+        json=request("fallback-ordered"),
+        headers={"Idempotency-Key": "fallback-ordered"},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"
+    assert calls == ["openai/primary", "anthropic/secondary"]
+
+
+def test_permanent_provider_error_does_not_fallback(monkeypatch):
+    calls = []
+
+    async def complete(*, task, source_data, model, max_tokens):
+        calls.append(model)
+        raise ProviderError("provider_error", retryable=False)
+
+    monkeypatch.setattr(provider, "complete", complete)
+    monkeypatch.setattr(settings, "routing_policy", {})
+    monkeypatch.setattr(settings, "primary_model", "openai/primary")
+    monkeypatch.setattr(settings, "fallback_model", "anthropic/fallback")
+    response = TestClient(app).post(
+        "/api/v1/internal/ai/execute",
+        json=request("fallback-permanent"),
+        headers={"Idempotency-Key": "fallback-permanent"},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "provider_unavailable"
+    assert calls == ["openai/primary"]
+
+
+def test_retryable_errors_exhaust_ordered_models(monkeypatch):
+    calls = []
+
+    async def complete(*, task, source_data, model, max_tokens):
+        calls.append(model)
+        raise ProviderError("provider_transient", retryable=True)
+
+    monkeypatch.setattr(provider, "complete", complete)
+    monkeypatch.setattr(
+        settings,
+        "routing_policy",
+        {"scholarship_extraction": {"models": ["one/model", "two/model"]}},
+    )
+    monkeypatch.setattr(settings, "fallback_model", "three/model")
+    response = TestClient(app).post(
+        "/api/v1/internal/ai/execute",
+        json=request("fallback-exhausted"),
+        headers={"Idempotency-Key": "fallback-exhausted"},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "provider_unavailable"
+    assert calls == ["one/model", "two/model", "three/model"]

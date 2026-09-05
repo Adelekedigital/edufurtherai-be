@@ -24,6 +24,20 @@ else:
 provider = LiteLLMProvider()
 
 
+def ordered_models(task: str) -> list[str]:
+    configured_policy = settings.routing_policy.get(task, {})
+    configured_models = configured_policy.get("models", [])
+    if isinstance(configured_models, list) and configured_models:
+        candidates = [model for model in configured_models if isinstance(model, str)]
+    else:
+        task_model = settings.task_models.get(task)
+        candidates = [task_model] if isinstance(task_model, str) else []
+        if not candidates:
+            candidates = [settings.primary_model]
+    candidates.append(settings.fallback_model)
+    return list(dict.fromkeys(model for model in candidates if model))
+
+
 @app.middleware("http")
 async def request_context(request: Request, call_next: Any) -> JSONResponse:
     inbound = request.headers.get("X-Request-ID", "")
@@ -158,19 +172,7 @@ async def execute(request: Request, body: ExecuteRequest) -> ExecuteResponse | J
     else:
         output = None
         status = TerminalStatus.PROVIDER_UNAVAILABLE
-        configured_policy = settings.routing_policy.get(body.task.value, {})
-        configured_models = configured_policy.get("models", [])
-        configured = (
-            configured_models[0]
-            if isinstance(configured_models, list) and configured_models
-            else settings.task_models.get(body.task.value)
-        )
-        models = (
-            (configured, settings.fallback_model)
-            if configured
-            else (settings.primary_model, settings.fallback_model)
-        )
-        for model in models:
+        for model in ordered_models(body.task.value):
             if not model:
                 continue
             try:
