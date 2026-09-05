@@ -29,7 +29,9 @@ class Settings(BaseSettings):
     service_issuer: str = "edufurther-ai-router"
     service_audience: str = "edufurther-ai-router"
     service_jwt_public_key: str = ""
+    service_jwt_keys: dict[str, str] = Field(default_factory=dict)
     service_jwt_algorithm: str = "RS256"
+    service_jwt_required_scope: str = ""
     primary_model: str = ""
     fallback_model: str = ""
     task_models: dict[str, str] = Field(default_factory=dict)

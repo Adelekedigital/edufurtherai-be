@@ -62,15 +62,25 @@ async def request_context(request: Request, call_next: Any) -> JSONResponse:
 
 
 async def authenticate(request: Request) -> tuple[str, set[str]] | None:
-    if not settings.service_jwt_public_key:
+    if not settings.service_jwt_public_key and not settings.service_jwt_keys:
         return None
-    token = request.headers.get("Authorization", "").removeprefix("Bearer ")
-    if not token:
+    authorization = request.headers.get("Authorization", "")
+    if not authorization.startswith("Bearer "):
         return None
+    token = authorization.removeprefix("Bearer ")
     try:
+        header = jwt.get_unverified_header(token)
+        kid = str(header.get("kid", ""))
+        key = (
+            settings.service_jwt_keys.get(kid)
+            if settings.service_jwt_keys
+            else settings.service_jwt_public_key
+        )
+        if not key or (settings.service_jwt_keys and not kid):
+            return None
         claims = jwt.decode(
             token,
-            settings.service_jwt_public_key,
+            key,
             algorithms=[settings.service_jwt_algorithm],
             issuer=settings.service_issuer,
             audience=settings.service_audience,
@@ -112,6 +122,10 @@ async def execute(request: Request, body: ExecuteRequest) -> ExecuteResponse | J
     identity = await authenticate(request)
     if settings.environment != "development" and identity is None:
         return problem(request, 401, "Unauthorized", "UNAUTHORIZED", "Authentication failed")
+    if settings.service_jwt_required_scope and (
+        identity is None or settings.service_jwt_required_scope not in identity[1]
+    ):
+        return problem(request, 403, "Forbidden", "INSUFFICIENT_SCOPE", "Required scope is missing")
     policy = POLICIES.get(body.task)
     if policy is None or body.product_id not in policy.allowed_products:
         return problem(request, 403, "Forbidden", "TASK_NOT_ALLOWED", "Task is not authorized")

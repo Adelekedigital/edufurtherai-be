@@ -1,3 +1,6 @@
+from datetime import UTC, datetime, timedelta
+
+import jwt
 import pytest
 from fastapi.testclient import TestClient
 
@@ -293,3 +296,50 @@ def test_product_task_rate_limit_returns_problem(monkeypatch):
     assert second.status_code == 429
     assert second.json()["code"] == "RATE_LIMITED"
     assert calls == ["openai/rate-test"]
+
+
+def test_jwt_key_registry_scope_and_replay(monkeypatch):
+    async def complete(*, task, source_data, model, max_tokens):
+        return {"candidate": {}, "evidence": []}
+
+    now = datetime.now(UTC)
+    token = jwt.encode(
+        {
+            "iss": "edufurther-ai-router",
+            "sub": "scholarship-finder-worker",
+            "aud": "edufurther-ai-router",
+            "iat": now,
+            "nbf": now,
+            "exp": now + timedelta(minutes=1),
+            "jti": "jwt-registry-test",
+            "scope": "ai:execute",
+        },
+        "rotated-secret-with-at-least-32-bytes",
+        algorithm="HS256",
+        headers={"kid": "rotated"},
+    )
+    monkeypatch.setattr(settings, "environment", "production")
+    monkeypatch.setattr(settings, "service_jwt_public_key", "")
+    monkeypatch.setattr(
+        settings, "service_jwt_keys", {"rotated": "rotated-secret-with-at-least-32-bytes"}
+    )
+    monkeypatch.setattr(settings, "service_jwt_algorithm", "HS256")
+    monkeypatch.setattr(settings, "service_jwt_required_scope", "ai:execute")
+    monkeypatch.setattr(settings, "routing_policy", {})
+    monkeypatch.setattr(settings, "primary_model", "openai/auth-test")
+    monkeypatch.setattr(settings, "fallback_model", "")
+    monkeypatch.setattr(provider, "complete", complete)
+    store.replayed_jtis.clear()
+    client = TestClient(app)
+    first = client.post(
+        "/api/v1/internal/ai/execute",
+        json=request("jwt-registry-key"),
+        headers={"Idempotency-Key": "jwt-registry-key", "Authorization": f"Bearer {token}"},
+    )
+    replay = client.post(
+        "/api/v1/internal/ai/execute",
+        json=request("jwt-registry-replay"),
+        headers={"Idempotency-Key": "jwt-registry-replay", "Authorization": f"Bearer {token}"},
+    )
+    assert first.status_code == 200
+    assert replay.status_code == 401
