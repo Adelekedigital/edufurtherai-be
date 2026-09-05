@@ -15,7 +15,7 @@ contain candidate output only; no `verified` state is ever produced.
 
 ```powershell
 uv sync
-uv run uvicorn app.main:app --reload
+uv run fastapi dev src/app/main.py
 ```
 
 Copy `.env.example` to `.env` and provide the approved model(s), provider credentials consumed
