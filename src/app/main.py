@@ -179,8 +179,9 @@ async def execute(request: Request, body: ExecuteRequest) -> ExecuteResponse | J
         policy_version=settings.model_policy_version,
     )
     response: dict[str, Any]
-    spent_usd = getattr(store, "spent_usd", 0.0)
-    if spent_usd >= settings.daily_budget_usd:
+    if await store.budget_exhausted(
+        body.product_id, body.task.value, settings.budget_for(body.product_id, body.task.value)
+    ):
         response = {
             "request_id": request_id,
             "status": TerminalStatus.BUDGET_EXHAUSTED,
@@ -214,6 +215,7 @@ async def execute(request: Request, body: ExecuteRequest) -> ExecuteResponse | J
                             "output_tokens": result.output_tokens,
                             "estimated_cost_usd": result.estimated_cost_usd or 0,
                             "attempts": 1,
+                            "budget_usd": settings.budget_for(body.product_id, body.task.value),
                         }
                     )
                 else:

@@ -226,3 +226,36 @@ def test_provider_usage_is_recorded(monkeypatch):
     assert usage["input_tokens"] == 12
     assert usage["output_tokens"] == 7
     assert usage["estimated_cost_usd"] == 0.004
+
+
+def test_product_task_budget_blocks_new_request(monkeypatch):
+    calls = []
+
+    async def complete(*, task, source_data, model, max_tokens):
+        calls.append(model)
+        return CompletionResult(output={"candidate": {}, "evidence": []}, estimated_cost_usd=0.004)
+
+    store.usage.clear()
+    monkeypatch.setattr(provider, "complete", complete)
+    monkeypatch.setattr(settings, "routing_policy", {})
+    monkeypatch.setattr(settings, "primary_model", "openai/budget-test")
+    monkeypatch.setattr(settings, "fallback_model", "")
+    monkeypatch.setattr(
+        settings,
+        "product_task_budgets",
+        {"scholarship_finder:scholarship_extraction": 0.003},
+    )
+    client = TestClient(app)
+    first = client.post(
+        "/api/v1/internal/ai/execute",
+        json=request("budget-first"),
+        headers={"Idempotency-Key": "budget-first"},
+    )
+    second = client.post(
+        "/api/v1/internal/ai/execute",
+        json=request("budget-second"),
+        headers={"Idempotency-Key": "budget-second"},
+    )
+    assert first.json()["status"] == "completed"
+    assert second.json()["status"] == "budget_exhausted"
+    assert calls == ["openai/budget-test"]

@@ -6,7 +6,13 @@ import pytest
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.infra.models import AIIdempotencyKey, AIRequest, AIUsage, ServiceJTIReplay
+from app.infra.models import (
+    AIBudgetPeriod,
+    AIIdempotencyKey,
+    AIRequest,
+    AIUsage,
+    ServiceJTIReplay,
+)
 from app.infra.store import PostgresStore
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -31,6 +37,7 @@ async def _exercise_store() -> None:
     async with sessions() as session:
         await session.execute(delete(AIIdempotencyKey))
         await session.execute(delete(AIUsage))
+        await session.execute(delete(AIBudgetPeriod))
         await session.execute(delete(AIRequest))
         await session.execute(delete(ServiceJTIReplay))
         await session.commit()
@@ -57,7 +64,14 @@ async def _exercise_store() -> None:
     )
     async with sessions() as session:
         usage = await session.scalar(select(AIUsage).where(AIUsage.request_id == request_id))
+        budget = await session.scalar(
+            select(AIBudgetPeriod).where(
+                AIBudgetPeriod.product_id == "scholarship_finder",
+                AIBudgetPeriod.task == "scholarship_extraction",
+            )
+        )
     assert usage is not None and usage.estimated_cost_usd == 0.001
+    assert budget is not None and budget.spent_usd == 0.001
 
     response = {
         "request_id": request_id,

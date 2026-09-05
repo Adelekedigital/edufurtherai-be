@@ -37,12 +37,16 @@ class Settings(BaseSettings):
     routing_policy: dict[str, TaskRoutingPolicy] = Field(default_factory=dict)
     model_policy_version: str = "ai-policy-v1"
     daily_budget_usd: float = 25.0
+    product_task_budgets: dict[str, float] = Field(default_factory=dict)
     max_source_bytes: int = 16_384
     langfuse_enabled: bool = False
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
     langfuse_host: str = "https://cloud.langfuse.com"
     database_url: str = ""
+
+    def budget_for(self, product_id: str, task: str) -> float:
+        return self.product_task_budgets.get(f"{product_id}:{task}", self.daily_budget_usd)
 
 
 settings = Settings()

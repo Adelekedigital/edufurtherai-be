@@ -1,15 +1,15 @@
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.infra.models import AIIdempotencyKey, AIRequest, AIUsage
+from app.infra.models import AIBudgetPeriod, AIIdempotencyKey, AIRequest, AIUsage
 
 
 @dataclass
@@ -47,6 +47,15 @@ class MemoryStore:
 
     async def record_usage(self, usage: dict[str, Any]) -> None:
         self.usage.append(usage)
+        self.spent_usd += float(usage.get("estimated_cost_usd") or 0)
+
+    async def budget_exhausted(self, product: str, task: str, limit: float) -> bool:
+        spent = sum(
+            float(item.get("estimated_cost_usd") or 0)
+            for item in self.usage
+            if item.get("product_id") == product and item.get("task") == task
+        )
+        return spent >= limit
 
 
 class PostgresStore:
@@ -157,4 +166,39 @@ class PostgresStore:
     async def record_usage(self, usage: dict[str, Any]) -> None:
         async with self.sessions() as session:
             async with session.begin():
-                session.add(AIUsage(**usage))
+                budget = float(usage.get("budget_usd", 0))
+                cost = float(usage.get("estimated_cost_usd") or 0)
+                session.add(
+                    AIUsage(**{key: value for key, value in usage.items() if key != "budget_usd"})
+                )
+                await session.flush()
+                period = date.today()
+                await session.execute(
+                    insert(AIBudgetPeriod)
+                    .values(
+                        product_id=usage["product_id"],
+                        task=usage["task"],
+                        period_start=period,
+                        budget_usd=budget,
+                        spent_usd=cost,
+                    )
+                    .on_conflict_do_update(
+                        index_elements=["product_id", "task", "period_start"],
+                        set_={
+                            "spent_usd": AIBudgetPeriod.spent_usd + cost,
+                            "updated_at": func.now(),
+                        },
+                    )
+                )
+
+    async def budget_exhausted(self, product: str, task: str, limit: float) -> bool:
+        start = datetime.combine(date.today(), datetime.min.time(), tzinfo=UTC)
+        async with self.sessions() as session:
+            spent = await session.scalar(
+                select(func.coalesce(func.sum(AIUsage.estimated_cost_usd), 0)).where(
+                    AIUsage.product_id == product,
+                    AIUsage.task == task,
+                    AIUsage.created_at >= start,
+                )
+            )
+            return float(spent or 0) >= limit
