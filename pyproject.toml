@@ -1,0 +1,30 @@
+[project]
+name = "edufurther-ai-router"
+version = "0.1.0"
+description = "Shared, policy-owning AI router for Edufurther products"
+requires-python = ">=3.14"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn[standard]>=0.34,<1",
+  "pydantic-settings>=2.7,<3",
+  "PyJWT[crypto]>=2.10,<3",
+  "litellm>=1.63,<2",
+  "langfuse>=3,<4",
+  "SQLAlchemy[asyncio]>=2.0,<3",
+  "asyncpg>=0.30,<1",
+  "psycopg2-binary>=2.9,<3",
+  "alembic>=1.15,<2",
+]
+
+[dependency-groups]
+dev = ["httpx>=0.28,<1", "pytest>=8.3,<9", "ruff>=0.11,<1", "mypy>=1.15,<2"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
