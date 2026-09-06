@@ -264,7 +264,7 @@ async def execute(
                             "input_tokens": result.input_tokens,
                             "output_tokens": result.output_tokens,
                             "estimated_cost_usd": result.estimated_cost_usd or 0,
-                            "attempts": 1,
+                            "attempts": attempt,
                             "budget_usd": settings.budget_for(body.product_id, body.task.value),
                         }
                     )

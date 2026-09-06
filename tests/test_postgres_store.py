@@ -72,6 +72,8 @@ async def _exercise_store() -> None:
         )
     assert usage is not None and usage.estimated_cost_usd == 0.001
     assert budget is not None and budget.spent_usd == 0.001
+    assert not await store.budget_exhausted("scholarship_finder", "scholarship_extraction", 0.002)
+    assert await store.budget_exhausted("scholarship_finder", "scholarship_extraction", 0.001)
 
     response = {
         "request_id": request_id,
@@ -90,4 +92,21 @@ async def _exercise_store() -> None:
     assert not await store.claim_jti(
         "issuer", "integration-jti", datetime.now(UTC) + timedelta(minutes=5)
     )
+
+    async with sessions() as session:
+        async with session.begin():
+            session.add(
+                ServiceJTIReplay(
+                    issuer="issuer",
+                    jti="stale-jti",
+                    expires_at=datetime.now(UTC) - timedelta(minutes=10),
+                )
+            )
+    assert await store.claim_jti("issuer", "fresh-jti", datetime.now(UTC) + timedelta(minutes=5))
+    async with sessions() as session:
+        stale = await session.scalar(
+            select(ServiceJTIReplay).where(ServiceJTIReplay.jti == "stale-jti")
+        )
+    assert stale is None
+
     await engine.dispose()

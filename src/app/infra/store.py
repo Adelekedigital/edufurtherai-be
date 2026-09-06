@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, select, text
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -22,7 +22,7 @@ class MemoryStore:
     def __init__(self) -> None:
         self.records: dict[tuple[str, str], IdempotencyRecord] = {}
         self.spent_usd = 0.0
-        self.replayed_jtis: set[tuple[str, str]] = set()
+        self.replayed_jtis: dict[tuple[str, str], datetime] = {}
         self.usage: list[dict[str, Any]] = []
         self.request_times: dict[tuple[str, str], list[datetime]] = {}
 
@@ -39,11 +39,14 @@ class MemoryStore:
         self.records[(product, key)] = IdempotencyRecord(self.digest(payload), response)
 
     async def claim_jti(self, issuer: str, jti: str, expires_at: datetime) -> bool:
-        del expires_at
+        now = datetime.now(UTC)
+        self.replayed_jtis = {
+            identity: expiry for identity, expiry in self.replayed_jtis.items() if expiry > now
+        }
         identity = (issuer, jti)
         if identity in self.replayed_jtis:
             return False
-        self.replayed_jtis.add(identity)
+        self.replayed_jtis[identity] = expires_at
         return True
 
     async def record_usage(self, usage: dict[str, Any]) -> None:
@@ -174,6 +177,9 @@ class PostgresStore:
 
         async with self.sessions() as session:
             async with session.begin():
+                await session.execute(
+                    delete(ServiceJTIReplay).where(ServiceJTIReplay.expires_at < func.now())
+                )
                 result = await session.execute(
                     insert(ServiceJTIReplay)
                     .values(issuer=issuer, jti=jti, expires_at=expires_at)
@@ -210,13 +216,12 @@ class PostgresStore:
                 )
 
     async def budget_exhausted(self, product: str, task: str, limit: float) -> bool:
-        start = datetime.combine(date.today(), datetime.min.time(), tzinfo=UTC)
         async with self.sessions() as session:
             spent = await session.scalar(
-                select(func.coalesce(func.sum(AIUsage.estimated_cost_usd), 0)).where(
-                    AIUsage.product_id == product,
-                    AIUsage.task == task,
-                    AIUsage.created_at >= start,
+                select(AIBudgetPeriod.spent_usd).where(
+                    AIBudgetPeriod.product_id == product,
+                    AIBudgetPeriod.task == task,
+                    AIBudgetPeriod.period_start == date.today(),
                 )
             )
             return float(spent or 0) >= limit
