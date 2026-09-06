@@ -17,10 +17,13 @@ SYSTEM_PROMPTS = {
     ),
     Task.MATCH_EXPLANATION: (
         "Explain why the scholarship matches the given profile, using only the source text "
-        'below. Return only a JSON object of exactly this shape: {"explanation": '
-        '"<a concise explanation>", "evidence": [<short direct quotes from the source supporting '
-        'the explanation>]}. Never include a "verified" field under any circumstances; '
-        "verification is decided by a separate process, never by you."
+        "below. Address the profile's owner directly in second person ('you', 'your') - this is "
+        "a personalized answer to the specific person who asked, never a third-person "
+        "description of 'the applicant' or 'the candidate'. Return only a JSON object of exactly "
+        'this shape: {"explanation": "<a concise, second-person explanation>", "evidence": '
+        "[<short direct quotes from the source supporting the explanation>]}. Never include a "
+        '"verified" field under any circumstances; verification is decided by a separate '
+        "process, never by you."
     ),
 }
 
