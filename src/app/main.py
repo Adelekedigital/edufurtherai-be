@@ -287,8 +287,6 @@ async def execute(
             except ProviderError as exc:
                 status = TerminalStatus.PROVIDER_UNAVAILABLE
                 generation.finish(status="error", error_category=exc.category)
-                if not exc.retryable:
-                    break
         response = {
             "request_id": request_id,
             "status": status,

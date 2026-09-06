@@ -1,3 +1,4 @@
+import json
 import logging
 from typing import Any
 
@@ -5,6 +6,23 @@ from app.core.config import settings
 from app.domain.ai_router import CompletionResult, ProviderError, Task
 
 logger = logging.getLogger(__name__)
+
+SYSTEM_PROMPTS = {
+    Task.SCHOLARSHIP_EXTRACTION: (
+        "Extract scholarship details from the source text below. Return only a JSON object of "
+        'exactly this shape: {"candidate": {<extracted fields as key/value pairs>}, '
+        '"evidence": [<short direct quotes from the source supporting each extracted field>]}. '
+        'Never include a "verified" field under any circumstances; verification is decided by a '
+        "separate process, never by you."
+    ),
+    Task.MATCH_EXPLANATION: (
+        "Explain why the scholarship matches the given profile, using only the source text "
+        'below. Return only a JSON object of exactly this shape: {"explanation": '
+        '"<a concise explanation>", "evidence": [<short direct quotes from the source supporting '
+        'the explanation>]}. Never include a "verified" field under any circumstances; '
+        "verification is decided by a separate process, never by you."
+    ),
+}
 
 
 class LiteLLMProvider:
@@ -23,15 +41,14 @@ class LiteLLMProvider:
             result = await acompletion(
                 model=model,
                 messages=[
-                    {"role": "system", "content": "Return only the approved candidate JSON."},
-                    {"role": "user", "content": str(source_data)},
+                    {"role": "system", "content": SYSTEM_PROMPTS[task]},
+                    {"role": "user", "content": json.dumps(source_data)},
                 ],
                 max_tokens=max_tokens,
                 response_format={"type": "json_object"},
                 timeout=45,
                 **({"api_key": api_key} if api_key else {}),
             )
-            import json
 
             usage = getattr(result, "usage", None)
             hidden_params = getattr(result, "_hidden_params", {}) or {}
