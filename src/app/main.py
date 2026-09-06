@@ -3,7 +3,7 @@ from typing import Annotated, Any
 from uuid import uuid4
 
 import jwt
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, Header, Request
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -134,6 +134,7 @@ async def execute(
     request: Request,
     body: ExecuteRequest,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)] = None,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> ExecuteResponse | JSONResponse:
     identity = await authenticate(
         request,
@@ -152,7 +153,7 @@ async def execute(
     policy = POLICIES.get(body.task)
     if policy is None or body.product_id not in policy.allowed_products:
         return problem(request, 403, "Forbidden", "TASK_NOT_ALLOWED", "Task is not authorized")
-    if request.headers.get("Idempotency-Key") != body.idempotency_key:
+    if idempotency_key != body.idempotency_key:
         return problem(
             request,
             400,
