@@ -1,7 +1,10 @@
+import logging
 from typing import Any
 
 from app.core.config import settings
 from app.domain.ai_router import CompletionResult, ProviderError, Task
+
+logger = logging.getLogger(__name__)
 
 
 class LiteLLMProvider:
@@ -42,6 +45,7 @@ class LiteLLMProvider:
         except Exception as exc:
             name = type(exc).__name__.lower()
             retryable = any(x in name for x in ("timeout", "ratelimit", "serviceunavailable"))
+            logger.warning("provider call failed model=%s error=%s", model, exc, exc_info=True)
             raise ProviderError(
                 "provider_transient" if retryable else "provider_error", retryable
             ) from exc
