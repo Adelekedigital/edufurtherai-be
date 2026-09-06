@@ -119,7 +119,7 @@ def test_retryable_provider_error_uses_all_ordered_models(monkeypatch):
     assert calls == ["openai/primary", "anthropic/secondary"]
 
 
-def test_permanent_provider_error_does_not_fallback(monkeypatch):
+def test_permanent_provider_error_still_tries_next_model(monkeypatch):
     calls = []
 
     async def complete(*, task, source_data, model, max_tokens):
@@ -137,7 +137,7 @@ def test_permanent_provider_error_does_not_fallback(monkeypatch):
     )
     assert response.status_code == 200
     assert response.json()["status"] == "provider_unavailable"
-    assert calls == ["openai/primary"]
+    assert calls == ["openai/primary", "anthropic/fallback"]
 
 
 def test_retryable_errors_exhaust_ordered_models(monkeypatch):
