@@ -15,7 +15,8 @@ contain candidate output only; no `verified` state is ever produced.
 
 The execute endpoint uses short-lived, signed service JWTs. It does not use user sessions or
 password authentication. See [`docs/authentication.md`](docs/authentication.md) for the complete
-caller configuration, token claims, Swagger workflow, and failure responses.
+caller configuration, token claims, Swagger workflow, and failure responses. Onboarding a new
+caller service? Start with [`docs/integration-scholarship-finder.md`](docs/integration-scholarship-finder.md).
 
 ## Run locally
 
