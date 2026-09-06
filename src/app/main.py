@@ -20,7 +20,7 @@ from app.domain.ai_router import (
 from app.infra.database import create_database
 from app.infra.observability import LangfuseTracer
 from app.infra.providers import LiteLLMProvider
-from app.infra.store import MemoryStore, PostgresStore
+from app.infra.store import MemoryStore, PostgresStore, RequestIdConflict
 
 app = FastAPI(title="Edufurther AI Router", version="0.1.0")
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -186,26 +186,25 @@ async def execute(
         return problem(
             request, 409, "Conflict", "REQUEST_IN_PROGRESS", "Request is already in progress"
         )
-    if not await store.allow_rate_limit(
-        body.product_id, body.task.value, settings.rate_limit_for(body.product_id, body.task.value)
-    ):
-        return problem(
-            request,
-            429,
-            "Too Many Requests",
-            "RATE_LIMITED",
-            "Request rate limit exceeded",
-            True,
-        )
     request_id = request.state.request_id
     if isinstance(store, PostgresStore):
-        existing = await store.claim(
-            body.product_id,
-            body.idempotency_key,
-            payload,
-            request_id,
-            settings.model_policy_version,
-        )
+        try:
+            existing = await store.claim(
+                body.product_id,
+                body.idempotency_key,
+                payload,
+                request_id,
+                settings.model_policy_version,
+            )
+        except RequestIdConflict:
+            return problem(
+                request,
+                409,
+                "Conflict",
+                "REQUEST_ID_COLLISION",
+                "X-Request-ID collided with a different request; retry with a different value or "
+                "omit the header",
+            )
         if existing:
             if existing.digest != store.digest(payload):
                 return problem(
@@ -220,6 +219,17 @@ async def execute(
             return problem(
                 request, 409, "Conflict", "REQUEST_IN_PROGRESS", "Request is already in progress"
             )
+    if not await store.allow_rate_limit(
+        body.product_id, body.task.value, settings.rate_limit_for(body.product_id, body.task.value)
+    ):
+        return problem(
+            request,
+            429,
+            "Too Many Requests",
+            "RATE_LIMITED",
+            "Request rate limit exceeded",
+            True,
+        )
     trace = tracer.start(
         request_id=request_id,
         product_id=body.product_id,
