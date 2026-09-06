@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.config import settings
-from app.domain.ai_router import POLICIES, Task, validate_candidate
+from app.domain.ai_router import POLICIES, ProviderError, Task, validate_candidate
 from app.infra.providers import LiteLLMProvider
 
 
@@ -48,16 +48,22 @@ async def main(path: str) -> None:
         task = Task(row["task"])
         policy = POLICIES[task]
         model = settings.task_models.get(task.value, "")
-        output = await provider.complete(
-            task=task,
-            source_data=row["source_data"],
-            model=model,
-            max_tokens=policy.max_output_tokens,
-        )
         stats = summary.setdefault(
-            task.value, {"samples": 0, "valid": 0, "critical": 0, "critical_correct": 0}
+            task.value,
+            {"samples": 0, "valid": 0, "critical": 0, "critical_correct": 0, "errors": 0},
         )
         stats["samples"] += 1
+        try:
+            result = await provider.complete(
+                task=task,
+                source_data=row["source_data"],
+                model=model,
+                max_tokens=policy.max_output_tokens,
+            )
+        except ProviderError:
+            stats["errors"] += 1
+            continue
+        output = result.output
         if validate_candidate(task, output):
             stats["valid"] += 1
         for field in critical_fields(task, row.get("expected", {})):
