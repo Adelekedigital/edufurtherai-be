@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -18,7 +21,7 @@ class TraceHandle:
             self.span.update(metadata={"status": status})
             self.span.end()
         except Exception:
-            return
+            logger.warning("langfuse_trace_finish_failed", exc_info=True)
 
     def start_generation(self, model: str, attempt: int) -> GenerationHandle:
         if self.span is None:
@@ -32,6 +35,7 @@ class TraceHandle:
             )
             return GenerationHandle(generation)
         except Exception:
+            logger.warning("langfuse_generation_start_failed", exc_info=True)
             return GenerationHandle()
 
 
@@ -74,7 +78,7 @@ class GenerationHandle:
             )
             self.generation.end()
         except Exception:
-            return
+            logger.warning("langfuse_generation_finish_failed", exc_info=True)
 
 
 class LangfuseTracer:
@@ -94,6 +98,7 @@ class LangfuseTracer:
                 environment=settings.environment,
             )
         except Exception:
+            logger.warning("langfuse_client_init_failed", exc_info=True)
             self.client = None
 
     def start(
@@ -124,6 +129,7 @@ class LangfuseTracer:
             reference = self.client.get_trace_url(trace_id=trace_id)
             return TraceHandle(reference=reference, span=span)
         except Exception:
+            logger.warning("langfuse_trace_start_failed", exc_info=True)
             return TraceHandle()
 
     def flush(self) -> None:
@@ -132,4 +138,4 @@ class LangfuseTracer:
         try:
             self.client.flush()
         except Exception:
-            return
+            logger.warning("langfuse_flush_failed", exc_info=True)
