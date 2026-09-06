@@ -67,11 +67,7 @@ async def authenticate(
     request: Request, product_id: str, token: str | None = None
 ) -> tuple[str, set[str]] | None:
     caller = settings.service_callers.get(product_id)
-    if settings.service_callers and caller is None:
-        return None
-    if caller is not None and not caller.keys and not settings.service_jwt_keys:
-        return None
-    if caller is None and not settings.service_jwt_public_key and not settings.service_jwt_keys:
+    if caller is None or not caller.keys:
         return None
     authorization = f"Bearer {token}" if token else request.headers.get("Authorization", "")
     if not authorization.startswith("Bearer "):
@@ -80,11 +76,8 @@ async def authenticate(
     try:
         header = jwt.get_unverified_header(token)
         kid = str(header.get("kid", ""))
-        key_registry = (
-            caller.keys if caller is not None and caller.keys else settings.service_jwt_keys
-        )
-        key = key_registry.get(kid) if key_registry else settings.service_jwt_public_key
-        if not key or (key_registry and not kid):
+        key = caller.keys.get(kid) if kid else None
+        if not key:
             return None
         claims = jwt.decode(
             token,
@@ -95,29 +88,21 @@ async def authenticate(
                 "verify_aud": False,
             },
         )
-        if caller is not None:
-            audiences = claims["aud"] if isinstance(claims["aud"], list) else [claims["aud"]]
-            if (
-                str(claims["sub"]) != caller.subject
-                or str(claims["iss"]) != caller.issuer
-                or caller.audience not in {str(value) for value in audiences}
-            ):
-                return None
-            scopes = set(str(claims.get("scope", "")).split())
-            if caller.scopes and not caller.scopes.issubset(scopes):
-                return None
-        else:
-            audiences = claims["aud"] if isinstance(claims["aud"], list) else [claims["aud"]]
-            if str(claims["iss"]) != settings.service_issuer or settings.service_audience not in {
-                str(value) for value in audiences
-            }:
-                return None
-            scopes = set(str(claims.get("scope", "")).split())
+        audiences = claims["aud"] if isinstance(claims["aud"], list) else [claims["aud"]]
+        if (
+            str(claims["sub"]) != caller.subject
+            or str(claims["iss"]) != caller.issuer
+            or caller.audience not in {str(value) for value in audiences}
+        ):
+            return None
+        scopes = set(str(claims.get("scope", "")).split())
+        if caller.scopes and not caller.scopes.issubset(scopes):
+            return None
         if not await store.claim_jti(
             str(claims["iss"]), str(claims["jti"]), datetime.fromtimestamp(claims["exp"], UTC)
         ):
             return None
-        return str(claims["sub"]), set(str(claims.get("scope", "")).split())
+        return str(claims["sub"]), scopes
     except jwt.PyJWTError:
         return None
 

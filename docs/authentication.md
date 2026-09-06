@@ -37,9 +37,9 @@ Every token must contain:
 
 | Claim | Meaning |
 | --- | --- |
-| `iss` | Caller issuer; must match the registered caller or global `SERVICE_ISSUER`. |
+| `iss` | Caller issuer; must match the registered caller. |
 | `sub` | Caller subject; must match the registered caller. |
-| `aud` | Caller audience; must match the registered caller or global `SERVICE_AUDIENCE`. |
+| `aud` | Caller audience; must match the registered caller. |
 | `iat` | Issued-at timestamp. |
 | `nbf` | Not-before timestamp. |
 | `exp` | Expiration timestamp. Maximum token lifetime is 300 seconds. |
@@ -57,22 +57,14 @@ The JWT header must contain:
 
 ## Railway Configuration
 
-The router can use one global public key registry or keys registered per caller. The recommended
-production configuration registers each product caller explicitly:
+Every caller must be registered explicitly with its own public key(s); there is no shared global
+key registry. A caller with an empty `keys` map can never authenticate, by design:
 
 ```env
 ENVIRONMENT=production
 ALLOW_UNAUTHENTICATED_DEVELOPMENT=false
 SERVICE_JWT_ALGORITHM=RS256
 SERVICE_CALLERS={"scholarship_finder":{"subject":"scholarship-finder-worker","issuer":"scholarship-finder","audience":"edufurther-ai-router","keys":{"scholarship-finder-2026":"-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"},"scopes":["ai:execute"]}}
-```
-
-For a global key registry instead, use:
-
-```env
-SERVICE_JWT_KEYS={"scholarship-finder-2026":"-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"}
-SERVICE_ISSUER=edufurther-ai-router
-SERVICE_AUDIENCE=edufurther-ai-router
 ```
 
 Never put a caller private key in Railway or in this repository. The private key stays with the
@@ -160,3 +152,57 @@ token's `scope` claim and `SERVICE_JWT_REQUIRED_SCOPE`/the registered caller's `
 
 Because tokens expire within five minutes, old keys normally need to remain available for no more
 than the token lifetime plus a small deployment buffer.
+
+## Diagnosing And Fixing A 401 Caused By A Key Mismatch (Railway)
+
+A 401 in a deployed environment almost always means the router's registered public key does not
+match the private key the caller is actually signing with — not that the endpoint or the caller's
+request is malformed.
+
+### Confirm the router's registered key
+
+1. Open the Railway project, select the Router service and environment, and open **Variables**.
+2. Find `SERVICE_CALLERS` and locate the caller's `kid` (for `scholarship_finder`,
+   `scholarship-finder-2026` by default).
+3. Copy the PEM value registered under that `kid`.
+
+### Confirm the caller's actual signing key
+
+The caller's private key never lives in this repository or in the Router's Railway variables; it
+lives in the calling service's own secret store. Ask that service (or its deployment config) for
+the public key that corresponds to the private key it is signing with right now, and diff it
+against the PEM from the step above. A mismatch — for example after the caller's key pair was
+regenerated, rotated, or lost — is the entire bug; the router is behaving correctly by rejecting a
+token signed with a key it does not recognize.
+
+`.local-secrets/` in this repository is a local-dev convenience only, used to simulate being a
+caller when exercising `POST /api/v1/internal/ai/execute` by hand. Running
+`scripts/generate_service_keys.py` again overwrites it with no confirmation and no way to recover
+the previous key pair; never treat it as the source of truth for a real deployed caller's identity.
+
+### Roll the key without downtime
+
+1. In Railway → Variables, edit `SERVICE_CALLERS` and add the new public key under a **new** `kid`
+   (for example `scholarship-finder-2026-v2`) inside the existing caller's `keys` map, keeping the
+   old `kid`/key pair in place. `SERVICE_CALLERS` is one JSON blob covering every registered
+   caller — start from the current value rather than retyping it, so other callers are not dropped
+   by mistake.
+2. Save; Railway redeploys automatically. Confirm `/health` returns `200` after the redeploy.
+3. Update the caller service to sign new tokens with the new `kid` and its matching private key.
+4. Mint a token from the caller with the new `kid` and confirm
+   `POST /api/v1/internal/ai/execute` returns something other than `401` (any other status, for
+   example `provider_unavailable` when no model is configured, confirms authentication passed).
+5. Once tokens signed with the old key have had time to expire (at most five minutes, the maximum
+   JWT lifetime) and nothing is failing, remove the old `kid` entry from `SERVICE_CALLERS.keys` and
+   redeploy again.
+
+### Command-line alternative
+
+```powershell
+railway variables --set "SERVICE_CALLERS=<the full updated JSON>" --environment <environment-name>
+```
+
+Fetch the current value first (`railway variables` or `railway variables --json`) so the edit is
+applied to the real current JSON rather than a stale copy. Flag names vary across CLI versions —
+check `railway variables --help` for the installed version before running it against a shared
+environment.
