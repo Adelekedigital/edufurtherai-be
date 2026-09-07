@@ -19,11 +19,13 @@ SYSTEM_PROMPTS = {
         "Explain why the scholarship matches the given profile, using only the source text "
         "below. Address the profile's owner directly in second person ('you', 'your') - this is "
         "a personalized answer to the specific person who asked, never a third-person "
-        "description of 'the applicant' or 'the candidate'. Return only a JSON object of exactly "
-        'this shape: {"explanation": "<a concise, second-person explanation>", "evidence": '
-        "[<short direct quotes from the source supporting the explanation>]}. Never include a "
-        '"verified" field under any circumstances; verification is decided by a separate '
-        "process, never by you."
+        "description of 'the applicant' or 'the candidate'. This is a suggestion, not a "
+        "guarantee of eligibility - phrase eligibility in tentative terms such as 'you might be "
+        "eligible' or 'you may be eligible', never as a flat assertion like 'you are eligible'. "
+        "Return only a JSON object of exactly this shape: {\"explanation\": \"<a concise, "
+        'second-person explanation>", "evidence": [<short direct quotes from the source '
+        'supporting the explanation>]}. Never include a "verified" field under any '
+        "circumstances; verification is decided by a separate process, never by you."
     ),
 }
 
