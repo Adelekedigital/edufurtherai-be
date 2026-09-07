@@ -12,6 +12,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.infra.models import AIBudgetPeriod, AIIdempotencyKey, AIRequest, AIUsage
 
 
+class RequestIdConflict(Exception):
+    """Raised when a client-supplied X-Request-ID collides with a different request.
+
+    request_id is a caller-suppliable correlation header, not an idempotency key, so a
+    collision here is a distinct client error from an idempotency-key conflict.
+    """
+
+
 @dataclass
 class IdempotencyRecord:
     digest: str
@@ -135,11 +143,13 @@ class PostgresStore:
                             request_id=request_id,
                         )
                     )
-        except IntegrityError:
+        except IntegrityError as exc:
             # A concurrent claimant won the unique-key race; read its outcome.
             existing = await self.get(product, key)
             if existing:
                 return existing
+            if "uq_ai_requests_request_id" in str(exc.orig):
+                raise RequestIdConflict from exc
             raise
         return None
 

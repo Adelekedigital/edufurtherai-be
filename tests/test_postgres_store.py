@@ -13,7 +13,7 @@ from app.infra.models import (
     AIUsage,
     ServiceJTIReplay,
 )
-from app.infra.store import PostgresStore
+from app.infra.store import PostgresStore, RequestIdConflict
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DATABASE_URL, reason="DATABASE_URL is required")
@@ -49,6 +49,12 @@ async def _exercise_store() -> None:
     claimed = await store.get("scholarship_finder", "integration-key")
     assert claimed is not None
     assert claimed.response is None
+
+    with pytest.raises(RequestIdConflict):
+        await store.claim(
+            "scholarship_finder", "integration-key-different", payload, request_id, "v1"
+        )
+
     await store.record_usage(
         {
             "request_id": request_id,
