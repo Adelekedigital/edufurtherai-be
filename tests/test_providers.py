@@ -40,3 +40,31 @@ def test_litellm_provider_classifies_transport_failures(monkeypatch, error, retr
             )
         )
     assert caught.value.retryable is retryable
+
+def test_match_explanation_prompt_does_not_attribute_internal_evidence_to_profile(monkeypatch):
+    captured = {}
+
+    async def acompletion(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content='{"explanation":"ok","evidence":[]}'))],
+            usage=None,
+            _hidden_params={},
+        )
+
+    monkeypatch.setitem(sys.modules, "litellm", SimpleNamespace(acompletion=acompletion))
+    asyncio.run(
+        LiteLLMProvider().complete(
+            task=Task.MATCH_EXPLANATION,
+            source_data={
+                "profile": {"program_level": "masters", "country": "Ghana"},
+                "scholarship": {"last_verified_at": "2026-08-01T00:00:00Z"},
+            },
+            model="openai/test",
+            max_tokens=100,
+        )
+    )
+
+    prompt = captured["messages"][0]["content"]
+    assert "Only describe facts about the person's profile" in prompt
+    assert "Do not mention scholarship evidence freshness, verification recency" in prompt

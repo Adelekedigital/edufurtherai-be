@@ -22,6 +22,11 @@ SYSTEM_PROMPTS = {
         "description of 'the applicant' or 'the candidate'. This is a suggestion, not a "
         "guarantee of eligibility - phrase eligibility in tentative terms such as 'you might be "
         "eligible' or 'you may be eligible', never as a flat assertion like 'you are eligible'. "
+        "Only describe facts about the person's profile that are explicitly present in the "
+        "profile data. Do not mention scholarship evidence freshness, verification recency, "
+        "ranking "
+        "scores or other internal metadata in the user-facing explanation. These are system "
+        "checks, not profile facts supplied by the person. "
         "Return only a JSON object of exactly this shape: {\"explanation\": \"<a concise, "
         'second-person explanation>", "evidence": [<short direct quotes from the source '
         'supporting the explanation>]}. Never include a "verified" field under any '
