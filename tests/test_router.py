@@ -39,6 +39,8 @@ def test_health_and_contract():
         "output",
         "model_policy_version",
         "trace_reference",
+        "prompt_version",
+        "model",
     }
 
 
@@ -428,3 +430,142 @@ def test_jwt_key_registry_scope_and_replay(monkeypatch):
     )
     assert first.status_code == 200
     assert replay.status_code == 401
+
+
+def agent_request(task, key, source_data=None):
+    return {
+        "product_id": "edufurther_agent",
+        "feature_id": "scholarship_verification",
+        "task": task,
+        "taskrelation_id": "run-1",
+        "idempotency_key": key,
+        "source_data": source_data if source_data is not None else {"page_text": "a deadline"},
+    }
+
+
+def test_agent_task_is_not_available_to_the_finder_product():
+    """The agent's tasks and the product's tasks are separately authorized.
+    Sharing a router must not mean sharing a task surface."""
+    body = request("agent-task-wrong-product") | {"task": "split_list_candidates"}
+
+    response = TestClient(app).post(
+        "/api/v1/internal/ai/execute",
+        json=body,
+        headers={"Idempotency-Key": "agent-task-wrong-product"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["code"] == "TASK_NOT_ALLOWED"
+
+
+def test_finder_task_is_not_available_to_the_agent_product():
+    body = agent_request("scholarship_extraction", "finder-task-wrong-product")
+
+    response = TestClient(app).post(
+        "/api/v1/internal/ai/execute",
+        json=body,
+        headers={"Idempotency-Key": "finder-task-wrong-product"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["code"] == "TASK_NOT_ALLOWED"
+
+
+def test_agent_task_completes_and_reports_its_prompt_version(monkeypatch):
+    async def complete(*, task, source_data, model, max_tokens):
+        return {"page_type": "list", "reasons": [], "evidence": ["ten awards"]}
+
+    monkeypatch.setattr(provider, "complete", complete)
+    monkeypatch.setattr(settings, "primary_model", "openai/model-a")
+
+    response = TestClient(app).post(
+        "/api/v1/internal/ai/execute",
+        json=agent_request("classify_source_page", "agent-classify"),
+        headers={"Idempotency-Key": "agent-classify"},
+    )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["status"] == "completed"
+    assert body["output"]["page_type"] == "list"
+    assert body["prompt_version"] == "classify_source_page-v1"
+
+
+def test_source_limit_is_per_task_not_global(monkeypatch):
+    """A 100 KB page is too large to classify but is exactly what splitting a
+    list page needs - one global ceiling could not express both."""
+
+    async def complete(*, task, source_data, model, max_tokens):
+        return {"candidates": [], "evidence": []}
+
+    monkeypatch.setattr(provider, "complete", complete)
+    monkeypatch.setattr(settings, "primary_model", "openai/model-a")
+    page = {"page_text": "x" * 100_000}
+    client = TestClient(app)
+
+    too_large = client.post(
+        "/api/v1/internal/ai/execute",
+        json=agent_request("classify_source_page", "size-classify", page),
+        headers={"Idempotency-Key": "size-classify"},
+    )
+    assert too_large.status_code == 422
+    assert too_large.json()["code"] == "SOURCE_DATA_TOO_LARGE"
+
+    accepted = client.post(
+        "/api/v1/internal/ai/execute",
+        json=agent_request("split_list_candidates", "size-split", page),
+        headers={"Idempotency-Key": "size-split"},
+    )
+    assert accepted.status_code == 200
+
+
+def test_source_limit_measures_the_serialized_payload(monkeypatch):
+    """The old check measured `str(source_data)`, a Python repr that is
+    neither what the provider receives nor a stable proxy for its size. A
+    payload whose content sits just under the limit must be accepted."""
+
+    async def complete(*, task, source_data, model, max_tokens):
+        return {"candidate": {}, "evidence": []}
+
+    monkeypatch.setattr(provider, "complete", complete)
+    monkeypatch.setattr(settings, "primary_model", "openai/model-a")
+    # 16 KiB of content, as the Scholarship Finder client caps it, then
+    # wrapped in the dict it actually sends.
+    body = request("finder-16kib") | {
+        "source_data": {"raw_title": "Award", "raw_excerpt": "y" * 16_384}
+    }
+
+    response = TestClient(app).post(
+        "/api/v1/internal/ai/execute", json=body, headers={"Idempotency-Key": "finder-16kib"}
+    )
+
+    assert response.status_code == 200
+
+
+def test_the_response_names_the_model_that_actually_answered(monkeypatch):
+    """`model_policy_version` names the routing policy, not the model it
+    selected. Without this, "which model produced this fact" is
+    unanswerable and a per-model accuracy regression is invisible."""
+
+    async def complete(*, task, source_data, model, max_tokens):
+        if model == "openai/primary":
+            raise ProviderError("provider_transient", retryable=True)
+        return {"candidate": {}, "evidence": []}
+
+    monkeypatch.setattr(provider, "complete", complete)
+    monkeypatch.setattr(
+        settings,
+        "routing_policy",
+        {"scholarship_extraction": {"models": ["openai/primary", "anthropic/secondary"]}},
+    )
+
+    response = TestClient(app).post(
+        "/api/v1/internal/ai/execute",
+        json=request("model-reported"),
+        headers={"Idempotency-Key": "model-reported"},
+    )
+
+    body = response.json()
+    assert body["status"] == "completed"
+    # The fallback answered, so that is what must be reported.
+    assert body["model"] == "anthropic/secondary"

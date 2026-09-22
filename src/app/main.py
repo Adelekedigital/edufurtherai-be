@@ -12,9 +12,11 @@ from app.api.schemas import ExecuteRequest, ExecuteResponse
 from app.core.config import settings
 from app.domain.ai_router import (
     POLICIES,
+    PROMPT_VERSIONS,
     CompletionResult,
     ProviderError,
     TerminalStatus,
+    source_data_bytes,
     validate_candidate,
 )
 from app.infra.database import create_database
@@ -161,8 +163,7 @@ async def execute(
             "IDEMPOTENCY_KEY_MISMATCH",
             "Idempotency-Key must match the request body",
         )
-    raw = str(body.source_data).encode()
-    if len(raw) > settings.max_source_bytes:
+    if source_data_bytes(body.source_data) > policy.max_source_bytes:
         return problem(
             request,
             422,
@@ -230,6 +231,8 @@ async def execute(
             "Request rate limit exceeded",
             True,
         )
+    prompt_version = PROMPT_VERSIONS.get(body.task)
+    completed_model: str | None = None
     trace = tracer.start(
         request_id=request_id,
         product_id=body.product_id,
@@ -247,6 +250,9 @@ async def execute(
             "output": None,
             "model_policy_version": settings.model_policy_version,
             "trace_reference": trace.reference,
+            "prompt_version": prompt_version,
+            # No model ran, so naming one would be a lie.
+            "model": None,
         }
     else:
         output = None
@@ -291,6 +297,7 @@ async def execute(
                 )
                 if validate_candidate(body.task, output):
                     status = TerminalStatus.COMPLETED
+                    completed_model = model
                     generation.finish(status="completed", **usage)
                     break
                 status = TerminalStatus.REVIEW
@@ -304,6 +311,8 @@ async def execute(
             "output": output if status == TerminalStatus.COMPLETED else None,
             "model_policy_version": settings.model_policy_version,
             "trace_reference": trace.reference,
+            "prompt_version": prompt_version,
+            "model": completed_model,
         }
     trace.finish(str(response["status"]))
     tracer.flush()
