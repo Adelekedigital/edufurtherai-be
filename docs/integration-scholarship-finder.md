@@ -46,7 +46,7 @@ The Scholarship Finder backend owns its keypair end to end.
    ```
    Body: `product_id` (must be exactly `"scholarship_finder"`), `feature_id`, `task`
    (`scholarship_extraction` or `match_explanation` — nothing else is authorized), `taskrelation_id`
-   (alias: `correlation_id`), `idempotency_key`, `source_data` (bounded to 16 KiB serialized),
+   (alias: `correlation_id`), `idempotency_key`, `source_data` (serialized size bounded per task; see `POLICIES` in `src/app/domain/ai_router.py`),
    optional `journey_id` / `session_id` / `handoff_id`.
 3. **Generate `idempotency_key` deterministically** per logical unit of work (e.g. a hash of the
    job/content), not randomly per attempt — a fresh random key on every retry defeats

@@ -47,7 +47,6 @@ class Settings(BaseSettings):
     daily_budget_usd: float = 25.0
     product_task_budgets: dict[str, float] = Field(default_factory=dict)
     product_task_rate_limits: dict[str, int] = Field(default_factory=dict)
-    max_source_bytes: int = 16_384
     langfuse_enabled: bool = False
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""

@@ -41,13 +41,18 @@ def test_litellm_provider_classifies_transport_failures(monkeypatch, error, retr
         )
     assert caught.value.retryable is retryable
 
+
 def test_match_explanation_prompt_does_not_attribute_internal_evidence_to_profile(monkeypatch):
     captured = {}
 
     async def acompletion(**kwargs):
         captured.update(kwargs)
         return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content='{"explanation":"ok","evidence":[]}'))],
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content='{"explanation":"ok","evidence":[]}')
+                )
+            ],
             usage=None,
             _hidden_params={},
         )

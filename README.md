@@ -6,10 +6,30 @@ publisher, eligibility engine, or general agent runtime.
 
 ## Contract
 
-`POST /api/v1/internal/ai/execute` accepts only registered products and the V1 tasks
-`scholarship_extraction` and `match_explanation`. Calls require a short-lived signed service
-JWT and `Idempotency-Key`. Request payloads are limited to 16 KiB of source data. Responses
-contain candidate output only; no `verified` state is ever produced.
+`POST /api/v1/internal/ai/execute` accepts only registered products and registered tasks.
+Calls require a short-lived signed service JWT and `Idempotency-Key`. Responses contain
+candidate output only; no `verified` state is ever produced.
+
+Tasks are authorized per product - sharing this router does not mean sharing a task surface.
+
+| Product | Tasks |
+|---|---|
+| `scholarship_finder` | `scholarship_extraction`, `match_explanation` |
+| `edufurther_agent` | `classify_source_page`, `split_list_candidates`, `extract_scholarship_facts`, `compare_official_evidence`, `extract_eligibility_requirements` |
+
+Each task declares its own source-payload ceiling in `POLICIES`
+([`src/app/domain/ai_router.py`](src/app/domain/ai_router.py)), measured against the JSON the
+provider actually receives. They differ by orders of magnitude - classifying a page needs a
+sample, splitting a list page needs the whole thing - so there is no single global limit.
+
+Every response carries `prompt_version` alongside `model_policy_version`. Products persist it
+with the facts they extract, so an accuracy regression can be traced back to the exact prompt
+that produced it. Change a prompt's text, bump its version.
+
+Adding a task means four edits, all in this service: the `Task` enum, its `POLICIES` entry,
+its validator, and its `SYSTEM_PROMPTS` entry. `tests/test_task_registry.py` fails loudly if
+any of the four is missed - without it a missing prompt surfaces at runtime as a misleading
+`provider_unavailable`.
 
 ## Authentication
 
