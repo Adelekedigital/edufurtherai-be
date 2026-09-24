@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from typing import Any
 
 from app.core.config import settings
@@ -110,6 +111,56 @@ SYSTEM_PROMPTS = {
 }
 
 
+_JSON_FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.IGNORECASE)
+
+
+def _parse_output(content: str | None, finish_reason: str | None, model: str, task: Task) -> Any:
+    """Turn a model reply into JSON, or fail with a reason worth reading.
+
+    Every failure here used to surface as `provider_unavailable`, which
+    points at the provider when the provider answered perfectly well - a
+    whole investigation was spent looking for an outage that had not
+    happened. The three real causes are distinguished instead.
+
+    Truncation is the one worth naming loudest: a reply cut off at the
+    token ceiling is unrecoverable, and retrying it produces the same cut
+    in the same place. It is a configuration problem wearing a transport
+    problem's clothes.
+    """
+    if finish_reason == "length":
+        logger.warning(
+            "provider output truncated model=%s task=%s - raise max_output_tokens",
+            model,
+            task.value,
+        )
+        raise ProviderError("provider_output_truncated", retryable=False)
+    if not content:
+        logger.warning("provider returned no content model=%s task=%s", model, task.value)
+        raise ProviderError("provider_output_empty", retryable=False)
+
+    # `response_format=json_object` is requested, but not every model on
+    # every route honours it - some still wrap the object in a markdown
+    # fence or a sentence of preamble. Stripping that is cheaper than
+    # discarding an otherwise correct answer.
+    cleaned = _JSON_FENCE.sub("", content.strip())
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        start, end = cleaned.find("{"), cleaned.rfind("}")
+        if start != -1 and end > start:
+            try:
+                return json.loads(cleaned[start : end + 1])
+            except json.JSONDecodeError:
+                pass
+        logger.warning(
+            "provider output was not JSON model=%s task=%s head=%r",
+            model,
+            task.value,
+            cleaned[:120],
+        )
+        raise ProviderError("provider_output_invalid", retryable=False) from None
+
+
 class LiteLLMProvider:
     """Thin adapter; keys stay in LiteLLM/provider environment, never in caller input."""
 
@@ -138,12 +189,23 @@ class LiteLLMProvider:
             usage = getattr(result, "usage", None)
             hidden_params = getattr(result, "_hidden_params", {}) or {}
             cost = hidden_params.get("response_cost")
+            choice = result.choices[0]
             return CompletionResult(
-                output=json.loads(result.choices[0].message.content),
+                output=_parse_output(
+                    choice.message.content,
+                    getattr(choice, "finish_reason", None),
+                    model,
+                    task,
+                ),
                 input_tokens=getattr(usage, "prompt_tokens", None),
                 output_tokens=getattr(usage, "completion_tokens", None),
                 estimated_cost_usd=float(cost) if isinstance(cost, (int, float)) else None,
             )
+        except ProviderError:
+            # Already categorised - a truncated or unparseable reply is not
+            # the same failure as the provider being unreachable, and
+            # re-wrapping it here would erase that.
+            raise
         except Exception as exc:
             name = type(exc).__name__.lower()
             retryable = any(x in name for x in ("timeout", "ratelimit", "serviceunavailable"))
