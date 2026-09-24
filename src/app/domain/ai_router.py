@@ -72,7 +72,14 @@ POLICIES = {
     # The only task that needs a whole page: a list page's tenth scholarship
     # is exactly the one a head truncation would drop.
     Task.SPLIT_LIST_CANDIDATES: Policy(
-        Task.SPLIT_LIST_CANDIDATES, 1, 8_000, _AGENT, max_source_bytes=262_144
+        # 24k, not 8k: a roundup describing fifty awards produced a reply
+        # cut off mid-string at the old ceiling, which is unrecoverable -
+        # the retry truncates in the same place.
+        Task.SPLIT_LIST_CANDIDATES,
+        1,
+        24_000,
+        _AGENT,
+        max_source_bytes=262_144,
     ),
     Task.EXTRACT_SCHOLARSHIP_FACTS: Policy(
         Task.EXTRACT_SCHOLARSHIP_FACTS, 1, 2_000, _AGENT, max_source_bytes=65_536
