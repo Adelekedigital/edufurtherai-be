@@ -521,7 +521,7 @@ def test_bio_task_completes_for_the_platform_and_reports_its_prompt_version(monk
     assert response.status_code == 200
     assert body["status"] == "completed"
     assert set(body["output"]) == {"text"}
-    assert body["prompt_version"] == "bio_improve-v1"
+    assert body["prompt_version"] == "bio_improve-v2"
 
 
 def test_bio_tasks_are_not_available_to_other_products():
