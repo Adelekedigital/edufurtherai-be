@@ -16,6 +16,7 @@ from app.domain.ai_router import (
     CompletionResult,
     ProviderError,
     TerminalStatus,
+    normalize_output,
     source_data_bytes,
     validate_candidate,
 )
@@ -295,6 +296,7 @@ async def execute(
                     if isinstance(result, CompletionResult)
                     else {}
                 )
+                output = normalize_output(body.task, output)
                 if validate_candidate(body.task, output):
                     status = TerminalStatus.COMPLETED
                     completed_model = model

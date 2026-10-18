@@ -491,6 +491,90 @@ def test_agent_task_completes_and_reports_its_prompt_version(monkeypatch):
     assert body["prompt_version"] == "classify_source_page-v1"
 
 
+def platform_request(task, key, source_data):
+    return {
+        "product_id": "edufurther_platform",
+        "feature_id": "profile_writing_assist",
+        "task": task,
+        "taskrelation_id": "profile-1",
+        "idempotency_key": key,
+        "source_data": source_data,
+    }
+
+
+def test_bio_task_completes_for_the_platform_and_reports_its_prompt_version(monkeypatch):
+    async def complete(*, task, source_data, model, max_tokens):
+        return {"text": "I am an engineering student in Lagos, headed for a master's."}
+
+    monkeypatch.setattr(provider, "complete", complete)
+    monkeypatch.setattr(settings, "primary_model", "openai/model-a")
+
+    response = TestClient(app).post(
+        "/api/v1/internal/ai/execute",
+        json=platform_request(
+            "bio_improve", "platform-improve", {"role": "mentee", "text": "i study engineering"}
+        ),
+        headers={"Idempotency-Key": "platform-improve"},
+    )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["status"] == "completed"
+    assert set(body["output"]) == {"text"}
+    assert body["prompt_version"] == "bio_improve-v1"
+
+
+def test_bio_tasks_are_not_available_to_other_products():
+    body = agent_request("bio_draft", "bio-wrong-product", {"role": "mentee"})
+
+    response = TestClient(app).post(
+        "/api/v1/internal/ai/execute",
+        json=body,
+        headers={"Idempotency-Key": "bio-wrong-product"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["code"] == "TASK_NOT_ALLOWED"
+
+
+def test_a_bio_with_em_dashes_and_emoji_comes_back_repaired(monkeypatch):
+    async def complete(*, task, source_data, model, max_tokens):
+        return {"text": "I moved to Leeds \u2014 and stayed \U0001f600."}
+
+    monkeypatch.setattr(provider, "complete", complete)
+    monkeypatch.setattr(settings, "primary_model", "openai/model-a")
+
+    response = TestClient(app).post(
+        "/api/v1/internal/ai/execute",
+        json=platform_request("bio_draft", "platform-repaired", {"role": "mentor"}),
+        headers={"Idempotency-Key": "platform-repaired"},
+    )
+
+    body = response.json()
+    assert body["status"] == "completed"
+    assert body["output"] == {"text": "I moved to Leeds, and stayed."}
+
+
+def test_an_overlong_bio_is_never_returned_as_completed(monkeypatch):
+    """The platform writes `text` straight into a 1,500-character column."""
+
+    async def complete(*, task, source_data, model, max_tokens):
+        return {"text": "a" * 1_501}
+
+    monkeypatch.setattr(provider, "complete", complete)
+    monkeypatch.setattr(settings, "primary_model", "openai/model-a")
+
+    response = TestClient(app).post(
+        "/api/v1/internal/ai/execute",
+        json=platform_request("bio_draft", "platform-overlong", {"role": "mentor"}),
+        headers={"Idempotency-Key": "platform-overlong"},
+    )
+
+    body = response.json()
+    assert body["status"] == "review"
+    assert body["output"] is None
+
+
 def test_source_limit_is_per_task_not_global(monkeypatch):
     """A 100 KB page is too large to classify but is exactly what splitting a
     list page needs - one global ceiling could not express both."""

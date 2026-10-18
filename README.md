@@ -16,6 +16,7 @@ Tasks are authorized per product - sharing this router does not mean sharing a t
 |---|---|
 | `scholarship_finder` | `scholarship_extraction`, `match_explanation` |
 | `edufurther_agent` | `classify_source_page`, `split_list_candidates`, `extract_scholarship_facts`, `compare_official_evidence`, `extract_eligibility_requirements` |
+| `edufurther_platform` | `bio_draft`, `bio_improve` |
 
 Each task declares its own source-payload ceiling in `POLICIES`
 ([`src/app/domain/ai_router.py`](src/app/domain/ai_router.py)), measured against the JSON the
