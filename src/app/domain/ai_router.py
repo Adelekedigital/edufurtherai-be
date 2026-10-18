@@ -129,8 +129,8 @@ PROMPT_VERSIONS = {
     Task.EXTRACT_SCHOLARSHIP_FACTS: "extract_scholarship_facts-v1",
     Task.COMPARE_OFFICIAL_EVIDENCE: "compare_official_evidence-v1",
     Task.EXTRACT_ELIGIBILITY_REQUIREMENTS: "extract_eligibility_requirements-v1",
-    Task.BIO_DRAFT: "bio_draft-v1",
-    Task.BIO_IMPROVE: "bio_improve-v1",
+    Task.BIO_DRAFT: "bio_draft-v2",
+    Task.BIO_IMPROVE: "bio_improve-v2",
 }
 
 
