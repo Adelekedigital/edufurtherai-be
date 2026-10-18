@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
@@ -22,6 +23,11 @@ class Task(StrEnum):
     EXTRACT_SCHOLARSHIP_FACTS = "extract_scholarship_facts"
     COMPARE_OFFICIAL_EVIDENCE = "compare_official_evidence"
     EXTRACT_ELIGIBILITY_REQUIREMENTS = "extract_eligibility_requirements"
+    # EduFurther platform writing assist. Two tasks rather than one per role:
+    # the role travels in source_data and the prompt branches on it, so a
+    # mentee and a mentor bio share one policy, one validator and one cap.
+    BIO_DRAFT = "bio_draft"
+    BIO_IMPROVE = "bio_improve"
 
 
 class TerminalStatus(StrEnum):
@@ -54,6 +60,11 @@ class CompletionResult:
 
 _FINDER = frozenset({"scholarship_finder"})
 _AGENT = frozenset({"edufurther_agent"})
+_PLATFORM = frozenset({"edufurther_platform"})
+
+#: The platform's about_me column limit. Counted in code points, as
+#: Postgres char_length and Python len both count them.
+MAX_BIO_CHARS = 1_500
 
 
 POLICIES = {
@@ -92,6 +103,16 @@ POLICIES = {
     Task.EXTRACT_ELIGIBILITY_REQUIREMENTS: Policy(
         Task.EXTRACT_ELIGIBILITY_REQUIREMENTS, 1, 2_000, _AGENT, max_source_bytes=65_536
     ),
+    # 1,500 characters is ~400 tokens of English, but several times that in
+    # scripts that tokenize poorly, or when a model writes non-ASCII as \u
+    # escapes inside the JSON. A bio cut off at the ceiling is unrecoverable
+    # on retry, and the ceiling caps spend rather than setting it, so it is
+    # sized for the worst case.
+    Task.BIO_DRAFT: Policy(Task.BIO_DRAFT, 1, 4_000, _PLATFORM, max_source_bytes=8_192),
+    # The person's own 1,500-character text, measured as json.dumps sends
+    # it: ensure_ascii writes a non-ASCII character as a six-byte escape and
+    # an emoji as a twelve-byte surrogate pair, so the worst case is ~18 KB.
+    Task.BIO_IMPROVE: Policy(Task.BIO_IMPROVE, 1, 4_000, _PLATFORM, max_source_bytes=20_480),
 }
 
 
@@ -108,10 +129,42 @@ PROMPT_VERSIONS = {
     Task.EXTRACT_SCHOLARSHIP_FACTS: "extract_scholarship_facts-v1",
     Task.COMPARE_OFFICIAL_EVIDENCE: "compare_official_evidence-v1",
     Task.EXTRACT_ELIGIBILITY_REQUIREMENTS: "extract_eligibility_requirements-v1",
+    Task.BIO_DRAFT: "bio_draft-v1",
+    Task.BIO_IMPROVE: "bio_improve-v1",
 }
 
 
 PAGE_TYPES = frozenset({"individual", "list", "aggregator", "not_a_scholarship"})
+
+#: Markup the profile page would render literally: anything opening an HTML
+#: tag (closed or not), asterisks, bold underscores, code, markdown links,
+#: headings, blockquotes and list bullets. A bio is plain prose, so "<3" and
+#: "maths > physics" pass, and only a one- or two-digit number opening a line
+#: counts as a list item, so "2019. I moved" is not one.
+_MARKUP = re.compile(
+    r"</?[A-Za-z!]|\*|__|`|\[[^\]\n]*\]\(|^\s*(?:#{1,6}\s|[-+]\s|>|\d{1,2}[.)]\s)", re.MULTILINE
+)
+
+#: Owner rule for profile writing: no em dashes and no emoji, ever. Models
+#: reach for both habitually, so the router repairs a bio rather than
+#: rejecting it (`normalize_output`), and the validator re-checks afterwards.
+#: The dash set is the em dash and its look-alikes (horizontal bar, two- and
+#: three-em dashes, small em dash); a plain hyphen and the en dash stay
+#: allowed.
+_EM_DASHES = "\u2014\u2015\u2e3a\u2e3b\ufe58"
+#: The pictographic blocks, the scattered symbols that render as emoji by
+#: default, the variation selector that turns any other symbol into its emoji
+#: form, and the combining keycap.
+_EMOJI = (
+    "\u203c\u2049\u20e3\u231a\u231b\u2328\u23cf\u23e9-\u23fa\u24c2\u25aa-\u25fe"
+    "\u2600-\u27bf\u2934\u2935\u2b00-\u2bff\u3030\u303d\u3297\u3299\ufe0f"
+    "\U0001f000-\U0001faff"
+)
+_FORBIDDEN_IN_BIO = re.compile(f"[{_EM_DASHES}{_EMOJI}]")
+_DASH_RUN = re.compile(f"[ \\t]*[{_EM_DASHES}]+[ \\t]*")
+#: An emoji and everything that binds to it: a zero-width joiner only inside
+#: such a run, never on its own, because Indic scripts use it in plain text.
+_EMOJI_RUN = re.compile(f"[{_EMOJI}](?:[{_EMOJI}]|\u200d)*")
 
 
 class ProviderError(Exception):
@@ -179,6 +232,63 @@ def _validate_eligibility(output: dict[str, Any]) -> bool:
     return _is_dict_list(output.get("rules")) and _has_evidence(output)
 
 
+def _validate_bio(output: dict[str, Any]) -> bool:
+    # Exactly one key: the platform writes `text` straight into about_me, so
+    # anything else the model adds would be silently dropped at best.
+    text = output.get("text")
+    return (
+        set(output) == {"text"}
+        and isinstance(text, str)
+        and bool(text.strip())
+        and len(text) <= MAX_BIO_CHARS
+        and _MARKUP.search(text) is None
+        and _FORBIDDEN_IN_BIO.search(text) is None
+    )
+
+
+def _clean_bio_text(text: str) -> str:
+    """Replace each em dash with a comma and drop emoji, then tidy what
+    that leaves, so "I moved <em dash> and stayed <emoji>." reads "I moved,
+    and stayed." Markup is not repaired here; it is still rejected."""
+    text = _DASH_RUN.sub(", ", text)
+    text = _EMOJI_RUN.sub("", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    text = re.sub(r"[ \t]+([,.;:!?])", r"\1", text)
+    text = re.sub(r",[ \t]*([,.;:!?])", r"\1", text)
+    text = re.sub(r"(?m)^[ \t,]+|[ \t,]+$", "", text)
+    return text.strip()
+
+
+def _normalize_bio(output: dict[str, Any]) -> dict[str, Any]:
+    text = output.get("text")
+    if not isinstance(text, str):
+        return output
+    return {**output, "text": _clean_bio_text(text)}
+
+
+_NORMALIZERS: dict[Task, Callable[[dict[str, Any]], dict[str, Any]]] = {
+    Task.BIO_DRAFT: _normalize_bio,
+    Task.BIO_IMPROVE: _normalize_bio,
+}
+
+
+def normalize_output(task: Task, output: Any) -> Any:
+    """Repair what a task's rules allow repairing, before validation.
+
+    Only tasks with a registered normalizer are touched, and a normalizer
+    never raises into the execute loop: on any surprise the output passes
+    through unchanged and the validator decides.
+    """
+    normalizer = _NORMALIZERS.get(task)
+    if normalizer is None or not isinstance(output, dict):
+        return output
+    try:
+        return normalizer(output)
+    except Exception:  # pragma: no cover - defence in depth
+        logger.warning("normalizer raised for task=%s", task, exc_info=True)
+        return output
+
+
 _VALIDATORS: dict[Task, Callable[[dict[str, Any]], bool]] = {
     Task.SCHOLARSHIP_EXTRACTION: _validate_extraction,
     Task.MATCH_EXPLANATION: _validate_match_explanation,
@@ -187,6 +297,8 @@ _VALIDATORS: dict[Task, Callable[[dict[str, Any]], bool]] = {
     Task.EXTRACT_SCHOLARSHIP_FACTS: _validate_extraction,
     Task.COMPARE_OFFICIAL_EVIDENCE: _validate_comparison,
     Task.EXTRACT_ELIGIBILITY_REQUIREMENTS: _validate_eligibility,
+    Task.BIO_DRAFT: _validate_bio,
+    Task.BIO_IMPROVE: _validate_bio,
 }
 
 
